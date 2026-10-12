@@ -163,7 +163,7 @@ const size_t MaximumSize = 32 * 1024; // TODO: a good size
 const size_t PlaintextCount = 3;
 
 // Number of key sizes to test per plaintext
-const size_t KeySizes[] = {128 /*, 256 */};
+const size_t KeySizes[] = {128, 192, 256};
 
 // Number of keys to test per key size
 const size_t KeyCount = 3;
