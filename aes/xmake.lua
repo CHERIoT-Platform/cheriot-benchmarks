@@ -9,7 +9,7 @@ set_toolchains("cheriot-clang")
 option("board")
     set_default("sail")
 
-bearssl = "../network-stack/third_party/BearSSL"
+bearssl = "../third_party/BearSSL"
 
 debugOption("aesbench");
 compartment("aesbench")
