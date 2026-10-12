@@ -8,6 +8,7 @@
 #include <allocator.h>
 #include <compartment.h>
 #include <debug.hh>
+#include <ds/xoroshiro.h>
 #include <fail-simulator-on-error.h>
 #include <locks.hh>
 #include <platform-rdcycle.h>
@@ -159,22 +160,33 @@ const size_t MinimumSize = 32;
 const size_t MaximumSize = 32 * 1024; // TODO: a good size
 
 // Number of plaintexts to test per size
-const size_t PlaintextCount = 1;
+const size_t PlaintextCount = 3;
 
 // Number of key sizes to test per plaintext
 const size_t KeySizes[] = {128 /*, 256 */};
 
 // Number of keys to test per key size
-const size_t KeyCount = 1;
+const size_t KeyCount = 3;
 
 // Number of IVs to test per key
-const size_t IvCount = 1;
+const size_t IvCount = 3;
 
 // Repetition count for each input combination
-const size_t RepeatCount = 1;
+const size_t RepeatCount = 3;
+
+const uint8_t Seed = 1;
+
+static void
+fill_random_bytes(ds::xoroshiro::P16R8 &rand, uint8_t *buffer, size_t length)
+{
+	for (size_t i = 0; i < length; i++)
+		buffer[i] = rand.next();
+}
 
 int __cheri_compartment("aesbench") run()
 {
+	ds::xoroshiro::P16R8 rand(Seed);
+
 	AesImpl *const Implementations[]{
 	  // optimised for code size, non-constant time
 	  new BearAesSmall(),
@@ -206,7 +218,7 @@ int __cheri_compartment("aesbench") run()
 		for (size_t plaintextId = 0; plaintextId < PlaintextCount;
 		     plaintextId++)
 		{
-			/* Generate plaintext here */
+			fill_random_bytes(rand, plaintext.get(), plaintextSize);
 
 			for (size_t keySize : KeySizes)
 			{
@@ -216,12 +228,12 @@ int __cheri_compartment("aesbench") run()
 
 				for (size_t keyId = 0; keyId < KeyCount; keyId++)
 				{
-					/* Generate key here */
+					fill_random_bytes(rand, key.get(), keySizeBytes);
 
 					for (size_t ivId = 0; ivId < IvCount; ivId++)
 					{
 						uint8_t startIv[AES_IV_SIZE];
-						/* Generate IV here */
+						fill_random_bytes(rand, startIv, sizeof startIv);
 
 						for (AesImpl *impl : Implementations)
 						{
