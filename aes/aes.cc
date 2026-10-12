@@ -90,6 +90,24 @@ using BearAesSmall            = BearSslAesImpl<br_aes_small_cbcenc_keys,
                                                br_aes_small_cbcdec_run,
                                                BearAesSmallName>;
 
+const char BearAesBigName[] = "BearSSL.aes_big";
+using BearAesBig            = BearSslAesImpl<br_aes_big_cbcenc_keys,
+                                             br_aes_big_cbcdec_keys,
+                                             br_aes_big_cbcenc_init,
+                                             br_aes_big_cbcenc_run,
+                                             br_aes_big_cbcdec_init,
+                                             br_aes_big_cbcdec_run,
+                                             BearAesBigName>;
+
+const char BearAesCtName[] = "BearSSL.aes_ct";
+using BearAesCt            = BearSslAesImpl<br_aes_ct_cbcenc_keys,
+                                            br_aes_ct_cbcdec_keys,
+                                            br_aes_ct_cbcenc_init,
+                                            br_aes_ct_cbcenc_run,
+                                            br_aes_ct_cbcdec_init,
+                                            br_aes_ct_cbcdec_run,
+                                            BearAesCtName>;
+
 static std::pair<int, int> test(AesImpl       &impl,
                                 const uint8_t *plaintext,
                                 size_t         plaintextSize,
@@ -158,7 +176,14 @@ const size_t RepeatCount = 1;
 int __cheri_compartment("aesbench") run()
 {
 	AesImpl *const Implementations[]{
+	  // optimised for code size, non-constant time
 	  new BearAesSmall(),
+
+	  // table based, fast, non-constant time
+	  new BearAesBig(),
+
+	  // constant-time, but slower than big
+	  new BearAesCt(),
 	};
 
 	printf("#board\t"
