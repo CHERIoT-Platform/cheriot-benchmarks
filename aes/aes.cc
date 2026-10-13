@@ -24,8 +24,12 @@
 using Debug = ConditionalDebug<DEBUG_AESBENCH, "AES benchmark">;
 
 #define AES_CBC_IV_SIZE 16
+#define AES_CTR_IV_SIZE 12
 
-class AesCbcImpl
+/*
+    Generic AES encryption/decryption interface
+*/
+class AesImpl
 {
 	public:
 	/*
@@ -71,7 +75,7 @@ template<typename EncCtx,
          void DecInitFunc(DecCtx *ctx, const void *key, size_t len),
          void DecRunFunc(const DecCtx *ctx, void *iv, void *data, size_t len),
          const char *Name>
-class BearSslAesCbcImpl : public AesCbcImpl
+class BearSslAesCbcImpl : public AesImpl
 {
 	EncCtx encCtx;
 	DecCtx decCtx;
@@ -152,7 +156,7 @@ using BearAesCtCbc            = BearSslAesCbcImpl<br_aes_ct_cbcenc_keys,
                                                   br_aes_ct_cbcdec_run,
                                                   BearAesCtCbcName>;
 
-class MicroAes128CbcImpl : public AesCbcImpl
+class MicroAes128CbcImpl : public AesImpl
 {
 	public:
 	bool supports_key_size(size_t keySize) override
@@ -179,35 +183,31 @@ class MicroAes128CbcImpl : public AesCbcImpl
 	{ return "micro-AES.128.CBC"; }
 };
 
-#define AES_CTR_IV_SIZE 12
-
-class AesCtrImpl
+/*
+    Helper class for implementations using the same function for encryption and
+    decryption
+*/
+class AesSymmetricImpl : public AesImpl
 {
-	public:
-	/*
-	    Check that a key size is usable for this implementation
-	*/
-	virtual bool supports_key_size(size_t keySize) = 0;
-
-	/*
-	    Set the active key, required to stay alive for the lifetime of this
-	    class
-	*/
-	virtual void set_key(const uint8_t *key, size_t keySize) = 0;
-
 	/*
 	    Encrypt/decrypt inText to outText
-		Counter value should start from 1
 	*/
 	virtual void run(const uint8_t *iv,
 	                 const uint8_t *inText,
 	                 size_t         inTextSize,
 	                 uint8_t       *outText) = 0;
 
-	/*
-	    Get the name of the implementation used
-	*/
-	virtual const char *get_name() = 0;
+	void encrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *plaintext,
+	                   size_t         plainTextSize,
+	                   uint8_t       *ciphertext) override
+	{ run(iv, plaintext, plainTextSize, ciphertext); }
+
+	void decrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *ciphertext,
+	                   size_t         ciphertextSize,
+	                   uint8_t       *plaintext) override
+	{ run(iv, ciphertext, ciphertextSize, plaintext); }
 };
 
 template<typename Ctx,
@@ -218,7 +218,7 @@ template<typename Ctx,
                              void       *data,
                              size_t      len),
          const char *Name>
-class BearSslAesCtrImpl : public AesCtrImpl
+class BearSslAesCtrImpl : public AesSymmetricImpl
 {
 	Ctx ctx;
 
@@ -274,7 +274,7 @@ using BearAesCtCtr            = BearSslAesCtrImpl<br_aes_ct_ctr_keys,
                                                   br_aes_ct_ctr_run,
                                                   BearAesCtCtrName>;
 
-class MicroAes128CtrImpl : public AesCtrImpl
+class MicroAes128CtrImpl : public AesSymmetricImpl
 {
 	public:
 	bool supports_key_size(size_t keySize) override
@@ -295,12 +295,12 @@ class MicroAes128CtrImpl : public AesCtrImpl
 	{ return "micro-AES.128.CTR"; }
 };
 
-static std::pair<int, int> test_cbc(AesCbcImpl    &impl,
-                                    const uint8_t *plaintext,
-                                    size_t         plaintextSize,
-                                    const uint8_t *key,
-                                    size_t         keySizeBytes,
-                                    const uint8_t *startIv)
+static std::pair<int, int> test(AesImpl       &impl,
+                                const uint8_t *plaintext,
+                                size_t         plaintextSize,
+                                const uint8_t *key,
+                                size_t         keySizeBytes,
+                                const uint8_t *startIv)
 {
 	impl.set_key(key, keySizeBytes);
 
@@ -320,52 +320,6 @@ static std::pair<int, int> test_cbc(AesCbcImpl    &impl,
 	// Decrypt buffer
 	auto decStart = rdcycle();
 	impl.decrypt_bytes(
-	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
-	auto decEnd = rdcycle();
-	asm volatile("" : : : "memory");
-
-	// Check the output matches the original plaintext
-	for (int i = 0; i < plaintextSize; i++)
-	{
-		Debug::Invariant(plaintext[i] == decryptedPlaintext[i],
-		                 "{} byte {} was not a round trip",
-		                 impl.get_name(),
-		                 i);
-	}
-
-	return {
-	  encEnd - encStart,
-	  decEnd - decStart,
-	};
-}
-
-static std::pair<int, int> test_ctr(AesCtrImpl    &impl,
-                                    const uint8_t *plaintext,
-                                    size_t         plaintextSize,
-                                    const uint8_t *key,
-                                    size_t         keySizeBytes,
-                                    const uint8_t *startIv)
-{
-	impl.set_key(key, keySizeBytes);
-
-	auto ciphertext = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(ciphertext != nullptr, "Couldn't allocate ciphertext");
-	memcpy(ciphertext.get(), plaintext, plaintextSize);
-
-	auto decryptedPlaintext = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(decryptedPlaintext != nullptr,
-	              "Couldn't allocate decryptedPlaintext");
-	memcpy(decryptedPlaintext.get(), plaintext, plaintextSize);
-
-	// Encrypt buffer
-	auto encStart = rdcycle();
-	impl.run(startIv, plaintext, plaintextSize, ciphertext.get());
-	auto encEnd = rdcycle();
-	asm volatile("" : : : "memory");
-
-	// Decrypt buffer
-	auto decStart = rdcycle();
-	impl.run(
 	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
@@ -418,28 +372,24 @@ int __cheri_compartment("aesbench") run()
 	ds::xoroshiro::P16R8  rand8(Seed);
 	ds::xoroshiro::P64R32 rand32(Seed);
 
-	AesCbcImpl *const CbcImplementations[]{
+	AesImpl *const Implementations[]{
 	  // optimised for code size, non-constant time
 	  new BearAesSmallCbc(),
+	  new BearAesSmallCtr(),
 
 	  // table based, fast, non-constant time
 	  new BearAesBigCbc(),
+	  new BearAesBigCtr(),
 
 	  // constant-time, but slower than big
 	  new BearAesCtCbc(),
+	  new BearAesCtCtr(),
 
 	  new MicroAes128CbcImpl(),
-	};
-
-	AesCtrImpl *const CtrImplementations[]{
-	  new BearAesSmallCtr(),
-	  new BearAesBigCtr(),
-	  new BearAesCtCtr(),
 	  new MicroAes128CtrImpl(),
 	};
 
 	printf("#board\t"
-	       "mode\t"
 	       "plaintextSize\t"
 	       "plaintextId\t"
 	       "keySize\t"
@@ -480,7 +430,7 @@ int __cheri_compartment("aesbench") run()
 						// a subsection of this array for that
 						static_assert(AES_CTR_IV_SIZE < AES_CBC_IV_SIZE);
 
-						for (AesCbcImpl *impl : CbcImplementations)
+						for (AesImpl *impl : Implementations)
 						{
 							if (!impl->supports_key_size(keySize))
 								continue;
@@ -490,45 +440,15 @@ int __cheri_compartment("aesbench") run()
 							     repetition++)
 							{
 								auto [encRuntime, decRuntime] =
-								  test_cbc(*impl,
-								           plaintext.get(),
-								           plaintextSize,
-								           key.get(),
-								           keySizeBytes,
-								           startIv);
-								printf("%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
+								  test(*impl,
+								       plaintext.get(),
+								       plaintextSize,
+								       key.get(),
+								       keySizeBytes,
+								       startIv);
+								printf("%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
 								       "s\t%d\t%d\n",
 								       __XSTRING(BOARD),
-								       "CBC",
-								       plaintextSize,
-								       plaintextId,
-								       keySize,
-								       keyId,
-								       ivId,
-								       repetition,
-								       impl->get_name(),
-								       encRuntime,
-								       decRuntime);
-							}
-						}
-
-						for (AesCtrImpl *impl : CtrImplementations)
-						{
-							for (size_t repetition = 0;
-							     repetition < RepeatCount;
-							     repetition++)
-							{
-								auto [encRuntime, decRuntime] =
-								  test_ctr(*impl,
-								           plaintext.get(),
-								           plaintextSize,
-								           key.get(),
-								           keySizeBytes,
-								           startIv);
-								printf("%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
-								       "zu\t%s\t%d\t%d\n",
-								       __XSTRING(BOARD),
-								       "CTR",
 								       plaintextSize,
 								       plaintextId,
 								       keySize,
