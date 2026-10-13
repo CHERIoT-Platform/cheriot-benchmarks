@@ -23,12 +23,78 @@
 
 using Debug = ConditionalDebug<DEBUG_AESBENCH, "AES benchmark">;
 
-#define AES_CBC_IV_SIZE 16
-#define AES_CTR_IV_SIZE 12
+/*
+    Benchmark parameters
+*/
+
+// Range of plaintext sizes to test
+#ifndef AESBENCH_PLAINTEXT_SIZE_MIN
+#	define AESBENCH_PLAINTEXT_SIZE_MIN 32
+#endif
+#ifndef AESBENCH_PLAINTEXT_SIZE_MAX
+#	define AESBENCH_PLAINTEXT_SIZE_MAX (32 * 1024)
+#endif
+const size_t MinimumSize = AESBENCH_PLAINTEXT_SIZE_MIN;
+const size_t MaximumSize = AESBENCH_PLAINTEXT_SIZE_MAX;
+
+// Number of plaintexts to test per size
+#ifndef AESBENCH_PLAINTEXT_COUNT
+#	define AESBENCH_PLAINTEXT_COUNT 3
+#endif
+const size_t PlaintextCount = AESBENCH_PLAINTEXT_COUNT;
+
+// Key sizes to test per plaintext
+#ifndef AESBENCH_ENABLE_AES128
+#	define AESBENCH_ENABLE_AES128 1
+#endif
+#ifndef AESBENCH_ENABLE_AES192
+#	define AESBENCH_ENABLE_AES192 1
+#endif
+#ifndef AESBENCH_ENABLE_AES256
+#	define AESBENCH_ENABLE_AES256 1
+#endif
+const size_t KeySizes[] = {
+#if AESBENCH_ENABLE_AES128 == 1
+  128,
+#endif
+#if AESBENCH_ENABLE_AES192 == 1
+  192,
+#endif
+#if AESBENCH_ENABLE_AES256 == 1
+  256,
+#endif
+};
+
+// Number of keys to test per key size
+#ifndef AESBENCH_KEY_COUNT
+#	define AESBENCH_KEY_COUNT 3
+#endif
+const size_t KeyCount = AESBENCH_KEY_COUNT;
+
+// Number of IVs to test per key
+#ifndef AESBENCH_IV_COUNT
+#	define AESBENCH_IV_COUNT 3
+#endif
+const size_t IvCount = AESBENCH_IV_COUNT;
+
+// Repetition count for each input combination
+#ifndef AESBENCH_REPEAT_COUNT
+#	define AESBENCH_REPEAT_COUNT 3
+#endif
+const size_t RepeatCount = AESBENCH_REPEAT_COUNT;
+
+#ifndef AESBENCH_SEED
+#	define AESBENCH_SEED 1
+#endif
+const uint8_t Seed = AESBENCH_SEED;
 
 /*
     Generic AES encryption/decryption interface
 */
+
+#define AES_CBC_IV_SIZE 16
+#define AES_CTR_IV_SIZE 12
+
 class AesImpl
 {
 	public:
@@ -338,27 +404,6 @@ static std::pair<int, int> test(AesImpl       &impl,
 	  decEnd - decStart,
 	};
 }
-
-// Range of plaintext sizes to test
-const size_t MinimumSize = 32;
-const size_t MaximumSize = 32 * 1024; // TODO: a good size
-
-// Number of plaintexts to test per size
-const size_t PlaintextCount = 3;
-
-// Number of key sizes to test per plaintext
-const size_t KeySizes[] = {128, 192, 256};
-
-// Number of keys to test per key size
-const size_t KeyCount = 3;
-
-// Number of IVs to test per key
-const size_t IvCount = 3;
-
-// Repetition count for each input combination
-const size_t RepeatCount = 1;
-
-const uint8_t Seed = 1;
 
 static void
 fill_random_bytes(ds::xoroshiro::P16R8 &rand, uint8_t *buffer, size_t length)
