@@ -25,7 +25,7 @@ compartment("aesbench")
     add_files("aes.cc")
 
     -- micro-AES Configuration
-    add_includedirs(micro_aes)
+    add_sysincludedirs(micro_aes)
     add_files(micro_aes .. "/micro_aes.c")
 
     -- BearSSL Configuration
@@ -34,7 +34,7 @@ compartment("aesbench")
     -- These must be split up because Lua has a limit to the number of arguments
     -- to a function.
     -- TODO: many not needed
-    add_includedirs(
+    add_sysincludedirs(
         bearssl .. "/src",
         bearssl .. "/inc"
     )
