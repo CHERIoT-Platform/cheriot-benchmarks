@@ -197,12 +197,12 @@ class AesCtrImpl
 
 	/*
 	    Encrypt/decrypt inText to outText
+		Counter value should start from 1
 	*/
-	virtual uint32_t run(const uint8_t *iv,
-	                     uint32_t       cc,
-	                     const uint8_t *inText,
-	                     size_t         inTextSize,
-	                     uint8_t       *outText) = 0;
+	virtual void run(const uint8_t *iv,
+	                 const uint8_t *inText,
+	                 size_t         inTextSize,
+	                 uint8_t       *outText) = 0;
 
 	/*
 	    Get the name of the implementation used
@@ -238,16 +238,18 @@ class BearSslAesCtrImpl : public AesCtrImpl
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ InitFunc(&ctx, key, keySize); }
 
-	uint32_t run(const uint8_t *iv,
-	             uint32_t       cc,
-	             const uint8_t *inText,
-	             size_t         inTextSize,
-	             uint8_t       *outText) override
+	void run(const uint8_t *iv,
+	         const uint8_t *inText,
+	         size_t         inTextSize,
+	         uint8_t       *outText) override
 	{
 		// BearSSL works in-place
 		memcpy(outText, inText, inTextSize);
 
-		return RunFunc(&ctx, iv, cc, outText, inTextSize);
+		// Use the same counter start value as micro-AES
+		uint32_t cc = 1;
+
+		RunFunc(&ctx, iv, cc, outText, inTextSize);
 	}
 
 	const char *get_name() override
@@ -283,16 +285,11 @@ class MicroAes128CtrImpl : public AesCtrImpl
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ this->key = key; }
 
-	uint32_t run(const uint8_t *iv,
-	             uint32_t       cc,
-	             const uint8_t *inText,
-	             size_t         inTextSize,
-	             uint8_t       *outText) override
-	{
-		// TODO: nonce is handled differently to BearSSL
-		AES_CTR_encrypt(key, iv, inText, inTextSize, outText);
-		return 0;
-	}
+	void run(const uint8_t *iv,
+	         const uint8_t *inText,
+	         size_t         inTextSize,
+	         uint8_t       *outText) override
+	{ AES_CTR_encrypt(key, iv, inText, inTextSize, outText); }
 
 	const char *get_name() override
 	{ return "micro-AES.128.CTR"; }
@@ -347,8 +344,7 @@ static std::pair<int, int> test_ctr(AesCtrImpl    &impl,
                                     size_t         plaintextSize,
                                     const uint8_t *key,
                                     size_t         keySizeBytes,
-                                    const uint8_t *startIv,
-                                    uint32_t       cc)
+                                    const uint8_t *startIv)
 {
 	impl.set_key(key, keySizeBytes);
 
@@ -363,13 +359,14 @@ static std::pair<int, int> test_ctr(AesCtrImpl    &impl,
 
 	// Encrypt buffer
 	auto encStart = rdcycle();
-	impl.run(startIv, cc, plaintext, plaintextSize, ciphertext.get());
+	impl.run(startIv, plaintext, plaintextSize, ciphertext.get());
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 	// Decrypt buffer
 	auto decStart = rdcycle();
-	impl.run(startIv, cc, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
+	impl.run(
+	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
@@ -403,9 +400,6 @@ const size_t KeyCount = 3;
 
 // Number of IVs to test per key
 const size_t IvCount = 3;
-
-// (CTR) Number of initial counters to test per key
-const size_t CcCount = 3;
 
 // Repetition count for each input combination
 const size_t RepeatCount = 1;
@@ -451,7 +445,6 @@ int __cheri_compartment("aesbench") run()
 	       "keySize\t"
 	       "keyId\t"
 	       "ivId\t"
-	       "ccid\t"
 	       "repetition\t"
 	       "implementation\t"
 	       "encryptionTime\t"
@@ -503,58 +496,48 @@ int __cheri_compartment("aesbench") run()
 								           key.get(),
 								           keySizeBytes,
 								           startIv);
-								printf(
-								  "%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%s\t%"
-								  "zu\t%s\t%"
-								  "d\t%d\n",
-								  __XSTRING(BOARD),
-								  "CBC",
-								  plaintextSize,
-								  plaintextId,
-								  keySize,
-								  keyId,
-								  ivId,
-								  "-", // cc parameter does not apply to CBC
-								  repetition,
-								  impl->get_name(),
-								  encRuntime,
-								  decRuntime);
+								printf("%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
+								       "s\t%d\t%d\n",
+								       __XSTRING(BOARD),
+								       "CBC",
+								       plaintextSize,
+								       plaintextId,
+								       keySize,
+								       keyId,
+								       ivId,
+								       repetition,
+								       impl->get_name(),
+								       encRuntime,
+								       decRuntime);
 							}
 						}
 
-						// cc parameter is CTR exclusive
-						for (size_t ccId = 0; ccId < CcCount; ccId++)
+						for (AesCtrImpl *impl : CtrImplementations)
 						{
-							uint32_t cc = rand32.next();
-							for (AesCtrImpl *impl : CtrImplementations)
+							for (size_t repetition = 0;
+							     repetition < RepeatCount;
+							     repetition++)
 							{
-								for (size_t repetition = 0;
-								     repetition < RepeatCount;
-								     repetition++)
-								{
-									auto [encRuntime, decRuntime] =
-									  test_ctr(*impl,
-									           plaintext.get(),
-									           plaintextSize,
-									           key.get(),
-									           keySizeBytes,
-									           startIv,
-									           ccId);
-									printf("%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
-									       "zu\t%zu\t%s\t%d\t%d\n",
-									       __XSTRING(BOARD),
-									       "CTR",
-									       plaintextSize,
-									       plaintextId,
-									       keySize,
-									       keyId,
-									       ivId,
-									       ccId,
-									       repetition,
-									       impl->get_name(),
-									       encRuntime,
-									       decRuntime);
-								}
+								auto [encRuntime, decRuntime] =
+								  test_ctr(*impl,
+								           plaintext.get(),
+								           plaintextSize,
+								           key.get(),
+								           keySizeBytes,
+								           startIv);
+								printf("%s\t%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
+								       "zu\t%s\t%d\t%d\n",
+								       __XSTRING(BOARD),
+								       "CTR",
+								       plaintextSize,
+								       plaintextId,
+								       keySize,
+								       keyId,
+								       ivId,
+								       repetition,
+								       impl->get_name(),
+								       encRuntime,
+								       decRuntime);
 							}
 						}
 					}
