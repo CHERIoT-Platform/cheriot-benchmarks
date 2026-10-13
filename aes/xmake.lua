@@ -9,6 +9,27 @@ set_toolchains("cheriot-clang")
 option("board")
     set_default("sail")
 
+option("aesbench-plaintext-size-min")
+    set_default("")
+option("aesbench-plaintext-size-max")
+    set_default("")
+option("aesbench-plaintext-count")
+    set_default("")
+option("aesbench-enable-aes128")
+    set_default("")
+option("aesbench-enable-aes192")
+    set_default("")
+option("aesbench-enable-aes256")
+    set_default("")
+option("aesbench-key-count")
+    set_default("")
+option("aesbench-iv-count")
+    set_default("")
+option("aesbench-repeat-count")
+    set_default("")
+option("aesbench-seed")
+    set_default("")
+
 bearssl = "../third_party/BearSSL"
 micro_aes = "../third_party/micro-AES"
 
@@ -23,6 +44,47 @@ compartment("aesbench")
     add_defines("BOARD=" .. tostring(get_config("board")))
 
     add_files("aes.cc")
+
+    local plaintext_size_min = get_config("aesbench-plaintext-size-min")
+    if type(plaintext_size_min) ~= "nil" and plaintext_size_min ~= "" then
+        add_defines("AESBENCH_PLAINTEXT_SIZE_MIN=" .. plaintext_size_min)
+    end
+    local plaintext_size_max = get_config("aesbench-plaintext-size-max")
+    if type(plaintext_size_max) ~= "nil" and plaintext_size_max ~= "" then
+        add_defines("AESBENCH_PLAINTEXT_SIZE_MAX=" .. plaintext_size_max)
+    end
+    local plaintext_count = get_config("aesbench-plaintext-count")
+    if type(plaintext_count) ~= "nil" and plaintext_count ~= "" then
+        add_defines("AESBENCH_PLAINTEXT_COUNT=" .. plaintext_count)
+    end
+    local enable_aes128 = get_config("aesbench-enable-aes128")
+    if type(enable_aes128) ~= "nil" and enable_aes128 ~= "" then
+        add_defines("AESBENCH_ENABLE_AES128=" .. enable_aes128)
+    end
+    local enable_aes192 = get_config("aesbench-enable-aes192")
+    if type(enable_aes192) ~= "nil" and enable_aes192 ~= "" then
+        add_defines("AESBENCH_ENABLE_AES192=" .. enable_aes192)
+    end
+    local enable_aes256 = get_config("aesbench-enable-aes256")
+    if type(enable_aes256) ~= "nil" and enable_aes256 ~= "" then
+        add_defines("AESBENCH_ENABLE_AES256=" .. enable_aes256)
+    end
+    local key_count = get_config("aesbench-key-count")
+    if type(key_count) ~= "nil" and key_count ~= "" then
+        add_defines("AESBENCH_KEY_COUNT=" .. key_count)
+    end
+    local iv_count = get_config("aesbench-iv-count")
+    if type(iv_count) ~= "nil" and iv_count ~= "" then
+        add_defines("AESBENCH_IV_COUNT=" .. iv_count)
+    end
+    local repeat_count = get_config("aesbench-repeat-count")
+    if type(repeat_count) ~= "nil" and repeat_count ~= "" then
+        add_defines("AESBENCH_REPEAT_COUNT=" .. repeat_count)
+    end
+    local seed = get_config("aesbench-seed")
+    if type(seed) ~= "nil" and seed ~= "" then
+        add_defines("AESBENCH_SEED=" .. seed)
+    end
 
     -- micro-AES Configuration
     add_sysincludedirs(micro_aes)
