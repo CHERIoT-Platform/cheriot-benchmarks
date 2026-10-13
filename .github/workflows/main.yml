@@ -27,3 +27,38 @@ jobs:
       run: ./scripts/generate_compile_commands.sh
     - name: Run clang-format and clang-tidy
       run: ./scripts/run_clang_tidy_format.sh /cheriot-tools/bin
+
+  run-benchmarks:
+    strategy:
+      matrix:
+        build-type: [ debug, release ]
+        board: [ sail ]
+        benchmark: [ aes ]
+        include:
+          - benchmark: aes
+            benchmark-flags: --aesbench-plaintext-size-min=32 --aesbench-plaintext-size-max=32 --aesbench-plaintext-count=1 --aesbench-key-count=1 --aesbench-iv-count=1 --aesbench-repeat-count=1
+            compartment: aesbench
+          - build-type: debug
+            benchmark: aes
+            build-flags: --debug-aesbench=y
+      fail-fast: false
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.devcontainer || 'ghcr.io/cheriot-platform/devcontainer:latest' }}
+      options: --user 1001
+    steps:
+    - name: Checkout repository and submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Build ${{ matrix.benchmark }}
+      run: |
+        set -e
+        cd aes
+        xmake f --board=${{ matrix.board }} --sdk=/cheriot-tools/ -m ${{ matrix.build-type }} ${{ matrix.build-flags }} ${{ matrix.benchmark-flags }}
+        xmake
+    - name: Run ${{ matrix.benchmark }}
+      run: |
+        set -e
+        cd aes
+        xmake run
