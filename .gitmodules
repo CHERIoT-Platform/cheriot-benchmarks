@@ -4,3 +4,6 @@
 [submodule "third_party/BearSSL"]
 	path = third_party/BearSSL
 	url = https://www.bearssl.org/git/BearSSL
+[submodule "third_party/micro-AES"]
+	path = third_party/micro-AES
+	url = https://github.com/polfosol/micro-AES.git

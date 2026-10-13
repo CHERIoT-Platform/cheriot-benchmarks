@@ -1,6 +1,7 @@
 // Copyright SCI Semiconductor
 // SPDX-License-Identifier: MIT
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <platform-rdcycle.h>
 
 #include <bearssl_block.h>
+#include <micro_aes.h>
 
 #ifndef DEBUG_AESBENCH
 #	define DEBUG_AESBENCH false
@@ -27,22 +29,34 @@ class AesCbcImpl
 {
 	public:
 	/*
+	    Check that a key size is usable for this implementation
+	*/
+	virtual bool supports_key_size(size_t keySize) = 0;
+
+	/*
 	    Set the active key, required to stay alive for the lifetime of this
 	    class
 	*/
 	virtual void set_key(const uint8_t *key, size_t keySize) = 0;
 
 	/*
-	    Encrypt plaintext, updating iv and plaintext in-place
+	    Encrypt plaintext
+	    Implementations may require that plaintext and ciphertext do not overlap
+	    (ex. micro-AES)
 	*/
-	virtual void
-	encrypt_bytes(uint8_t *iv, uint8_t *plaintext, size_t plainTextSize) = 0;
+	virtual void encrypt_bytes(const uint8_t *iv,
+	                           const uint8_t *plaintext,
+	                           size_t         plainTextSize,
+	                           uint8_t       *ciphertext) = 0;
 
 	/*
-	    Decrypt ciphertext, updating iv and ciphertext in-place
+	    Implementations may require that plaintext and ciphertext do not overlap
+	    (ex. micro-AES)
 	*/
-	virtual void
-	decrypt_bytes(uint8_t *iv, uint8_t *ciphertext, size_t ciphertextSize) = 0;
+	virtual void decrypt_bytes(const uint8_t *iv,
+	                           const uint8_t *ciphertext,
+	                           size_t         ciphertextSize,
+	                           uint8_t       *plaintext) = 0;
 
 	/*
 	    Get the name of the implementation used
@@ -62,21 +76,50 @@ class BearSslAesCbcImpl : public AesCbcImpl
 	EncCtx encCtx;
 	DecCtx decCtx;
 
+	bool supports_key_size(size_t keySize) override
+	{
+		switch (keySize)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
 	void set_key(const uint8_t *key, size_t keySize) override
 	{
 		EncInitFunc(&encCtx, key, keySize);
 		DecInitFunc(&decCtx, key, keySize);
 	}
 
-	void encrypt_bytes(uint8_t *iv,
-	                   uint8_t *plaintext,
-	                   size_t   plainTextSize) override
-	{ EncRunFunc(&encCtx, iv, plaintext, plainTextSize); }
+	void encrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *plaintext,
+	                   size_t         plainTextSize,
+	                   uint8_t       *ciphertext) override
+	{
+		// BearSSL works in-place
+		memcpy(ciphertext, plaintext, plainTextSize);
+		uint8_t workingIv[AES_CBC_IV_SIZE];
+		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
 
-	void decrypt_bytes(uint8_t *iv,
-	                   uint8_t *ciphertext,
-	                   size_t   ciphertextSize) override
-	{ DecRunFunc(&decCtx, iv, ciphertext, ciphertextSize); }
+		EncRunFunc(&encCtx, workingIv, ciphertext, plainTextSize);
+	}
+
+	void decrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *ciphertext,
+	                   size_t         ciphertextSize,
+	                   uint8_t       *plaintext) override
+	{
+		// BearSSL works in-place
+		memcpy(plaintext, ciphertext, ciphertextSize);
+		uint8_t workingIv[AES_CBC_IV_SIZE];
+		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
+
+		DecRunFunc(&decCtx, workingIv, plaintext, ciphertextSize);
+	}
 
 	const char *get_name() override
 	{ return Name; }
@@ -109,11 +152,43 @@ using BearAesCtCbc            = BearSslAesCbcImpl<br_aes_ct_cbcenc_keys,
                                                   br_aes_ct_cbcdec_run,
                                                   BearAesCtCbcName>;
 
+class MicroAes128CbcImpl : public AesCbcImpl
+{
+	public:
+	bool supports_key_size(size_t keySize) override
+	{ return keySize == 128; }
+
+	const uint8_t *key;
+
+	void set_key(const uint8_t *key, size_t keySize) override
+	{ this->key = key; }
+
+	void encrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *plaintext,
+	                   size_t         plainTextSize,
+	                   uint8_t       *ciphertext) override
+	{ AES_CBC_encrypt(key, iv, plaintext, plainTextSize, ciphertext); }
+
+	void decrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *ciphertext,
+	                   size_t         ciphertextSize,
+	                   uint8_t       *plaintext) override
+	{ AES_CBC_decrypt(key, iv, ciphertext, ciphertextSize, plaintext); }
+
+	const char *get_name() override
+	{ return "micro-AES.128.CBC"; }
+};
+
 #define AES_CTR_IV_SIZE 12
 
 class AesCtrImpl
 {
 	public:
+	/*
+	    Check that a key size is usable for this implementation
+	*/
+	virtual bool supports_key_size(size_t keySize) = 0;
+
 	/*
 	    Set the active key, required to stay alive for the lifetime of this
 	    class
@@ -121,12 +196,13 @@ class AesCtrImpl
 	virtual void set_key(const uint8_t *key, size_t keySize) = 0;
 
 	/*
-	    Encrypt/decrypt plaintext, updating in-place
+	    Encrypt/decrypt inText to outText
 	*/
 	virtual uint32_t run(const uint8_t *iv,
 	                     uint32_t       cc,
-	                     uint8_t       *plaintext,
-	                     size_t         plainTextSize) = 0;
+	                     const uint8_t *inText,
+	                     size_t         inTextSize,
+	                     uint8_t       *outText) = 0;
 
 	/*
 	    Get the name of the implementation used
@@ -146,14 +222,33 @@ class BearSslAesCtrImpl : public AesCtrImpl
 {
 	Ctx ctx;
 
+	bool supports_key_size(size_t keySize) override
+	{
+		switch (keySize)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ InitFunc(&ctx, key, keySize); }
 
 	uint32_t run(const uint8_t *iv,
 	             uint32_t       cc,
-	             uint8_t       *plaintext,
-	             size_t         plainTextSize) override
-	{ return RunFunc(&ctx, iv, cc, plaintext, plainTextSize); }
+	             const uint8_t *inText,
+	             size_t         inTextSize,
+	             uint8_t       *outText) override
+	{
+		// BearSSL works in-place
+		memcpy(outText, inText, inTextSize);
+
+		return RunFunc(&ctx, iv, cc, outText, inTextSize);
+	}
 
 	const char *get_name() override
 	{ return Name; }
@@ -177,6 +272,32 @@ using BearAesCtCtr            = BearSslAesCtrImpl<br_aes_ct_ctr_keys,
                                                   br_aes_ct_ctr_run,
                                                   BearAesCtCtrName>;
 
+class MicroAes128CtrImpl : public AesCtrImpl
+{
+	public:
+	bool supports_key_size(size_t keySize) override
+	{ return keySize == 128; }
+
+	const uint8_t *key;
+
+	void set_key(const uint8_t *key, size_t keySize) override
+	{ this->key = key; }
+
+	uint32_t run(const uint8_t *iv,
+	             uint32_t       cc,
+	             const uint8_t *inText,
+	             size_t         inTextSize,
+	             uint8_t       *outText) override
+	{
+		// TODO: nonce is handled differently to BearSSL
+		AES_CTR_encrypt(key, iv, inText, inTextSize, outText);
+		return 0;
+	}
+
+	const char *get_name() override
+	{ return "micro-AES.128.CTR"; }
+};
+
 static std::pair<int, int> test_cbc(AesCbcImpl    &impl,
                                     const uint8_t *plaintext,
                                     size_t         plaintextSize,
@@ -186,32 +307,30 @@ static std::pair<int, int> test_cbc(AesCbcImpl    &impl,
 {
 	impl.set_key(key, keySizeBytes);
 
-	// Duplicate plaintext to allow modifying in-place
-	auto workingText = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(workingText != nullptr, "Couldn't allocate workingText");
-	memcpy(workingText.get(), plaintext, plaintextSize);
+	auto ciphertext = std::make_unique<uint8_t[]>(plaintextSize);
+	Debug::Assert(ciphertext != nullptr, "Couldn't allocate ciphertext");
 
-	// Duplicate IV to allow modifying in-place
-	uint8_t workingIv[AES_CBC_IV_SIZE];
-	memcpy(workingIv, startIv, sizeof workingIv);
+	auto decryptedPlaintext = std::make_unique<uint8_t[]>(plaintextSize);
+	Debug::Assert(decryptedPlaintext != nullptr,
+	              "Couldn't allocate decryptedPlaintext");
 
 	// Encrypt buffer
 	auto encStart = rdcycle();
-	impl.encrypt_bytes(workingIv, workingText.get(), plaintextSize);
+	impl.encrypt_bytes(startIv, plaintext, plaintextSize, ciphertext.get());
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 	// Decrypt buffer
-	memcpy(workingIv, startIv, sizeof workingIv);
 	auto decStart = rdcycle();
-	impl.decrypt_bytes(workingIv, workingText.get(), plaintextSize);
+	impl.decrypt_bytes(
+	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 	// Check the output matches the original plaintext
 	for (int i = 0; i < plaintextSize; i++)
 	{
-		Debug::Invariant(plaintext[i] == workingText[i],
+		Debug::Invariant(plaintext[i] == decryptedPlaintext[i],
 		                 "{} byte {} was not a round trip",
 		                 impl.get_name(),
 		                 i);
@@ -233,27 +352,31 @@ static std::pair<int, int> test_ctr(AesCtrImpl    &impl,
 {
 	impl.set_key(key, keySizeBytes);
 
-	// Duplicate plaintext to allow modifying in-place
-	auto workingText = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(workingText != nullptr, "Couldn't allocate workingText");
-	memcpy(workingText.get(), plaintext, plaintextSize);
+	auto ciphertext = std::make_unique<uint8_t[]>(plaintextSize);
+	Debug::Assert(ciphertext != nullptr, "Couldn't allocate ciphertext");
+	memcpy(ciphertext.get(), plaintext, plaintextSize);
+
+	auto decryptedPlaintext = std::make_unique<uint8_t[]>(plaintextSize);
+	Debug::Assert(decryptedPlaintext != nullptr,
+	              "Couldn't allocate decryptedPlaintext");
+	memcpy(decryptedPlaintext.get(), plaintext, plaintextSize);
 
 	// Encrypt buffer
 	auto encStart = rdcycle();
-	impl.run(startIv, cc, workingText.get(), plaintextSize);
+	impl.run(startIv, cc, plaintext, plaintextSize, ciphertext.get());
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 	// Decrypt buffer
 	auto decStart = rdcycle();
-	impl.run(startIv, cc, workingText.get(), plaintextSize);
+	impl.run(startIv, cc, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 	// Check the output matches the original plaintext
 	for (int i = 0; i < plaintextSize; i++)
 	{
-		Debug::Invariant(plaintext[i] == workingText[i],
+		Debug::Invariant(plaintext[i] == decryptedPlaintext[i],
 		                 "{} byte {} was not a round trip",
 		                 impl.get_name(),
 		                 i);
@@ -310,12 +433,15 @@ int __cheri_compartment("aesbench") run()
 
 	  // constant-time, but slower than big
 	  new BearAesCtCbc(),
+
+	  new MicroAes128CbcImpl(),
 	};
 
 	AesCtrImpl *const CtrImplementations[]{
 	  new BearAesSmallCtr(),
 	  new BearAesBigCtr(),
 	  new BearAesCtCtr(),
+	  new MicroAes128CtrImpl(),
 	};
 
 	printf("#board\t"
@@ -363,6 +489,9 @@ int __cheri_compartment("aesbench") run()
 
 						for (AesCbcImpl *impl : CbcImplementations)
 						{
+							if (!impl->supports_key_size(keySize))
+								continue;
+
 							for (size_t repetition = 0;
 							     repetition < RepeatCount;
 							     repetition++)

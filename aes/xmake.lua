@@ -10,6 +10,7 @@ option("board")
     set_default("sail")
 
 bearssl = "../third_party/BearSSL"
+micro_aes = "../third_party/micro-AES"
 
 debugOption("aesbench");
 compartment("aesbench")
@@ -22,6 +23,10 @@ compartment("aesbench")
     add_defines("BOARD=" .. tostring(get_config("board")))
 
     add_files("aes.cc")
+
+    -- micro-AES Configuration
+    add_includedirs(micro_aes)
+    add_files(micro_aes .. "/micro_aes.c")
 
     -- BearSSL Configuration
     add_defines("BR_INT128=0", "BR_UMUL128=0", "BR_USE_UNIX_TIME=1")
