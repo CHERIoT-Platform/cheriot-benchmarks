@@ -23,6 +23,10 @@
 
 using Debug = ConditionalDebug<DEBUG_AESBENCH, "AES benchmark">;
 
+#ifndef AESBENCH_LOG_DATA
+#	define AESBENCH_LOG_DATA 0
+#endif
+
 /*
     Benchmark parameters
 */
@@ -383,12 +387,26 @@ static std::pair<int, int> test(AesImpl       &impl,
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
+#if AESBENCH_LOG_DATA == 1
+	fprintf(stderr, "%s Ciphertext: ", impl.get_name());
+	for (size_t i = 0; i < plaintextSize; i++)
+		fprintf(stderr, "%02x ", ciphertext[i]);
+	fprintf(stderr, "\n");
+#endif
+
 	// Decrypt buffer
 	auto decStart = rdcycle();
 	impl.decrypt_bytes(
 	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
+
+#if AESBENCH_LOG_DATA == 1
+	fprintf(stderr, "%s Decrypted Plaintext: ", impl.get_name());
+	for (size_t i = 0; i < plaintextSize; i++)
+		fprintf(stderr, "%02x ", decryptedPlaintext[i]);
+	fprintf(stderr, "\n");
+#endif
 
 	// Check the output matches the original plaintext
 	for (int i = 0; i < plaintextSize; i++)
@@ -455,6 +473,13 @@ int __cheri_compartment("aesbench") run()
 		     plaintextId++)
 		{
 			fill_random_bytes(rand8, plaintext.get(), plaintextSize);
+
+#if AESBENCH_LOG_DATA == 1
+			fprintf(stderr, "Plaintext: ");
+			for (size_t i = 0; i < plaintextSize; i++)
+				fprintf(stderr, "%02x ", plaintext[i]);
+			fprintf(stderr, "\n");
+#endif
 
 			for (size_t keySize : KeySizes)
 			{

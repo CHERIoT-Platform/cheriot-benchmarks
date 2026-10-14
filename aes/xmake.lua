@@ -30,6 +30,9 @@ option("aesbench-repeat-count")
 option("aesbench-seed")
     set_default("")
 
+option("aesbench-log-data")
+    set_default("")
+
 bearssl = "../third_party/BearSSL"
 micro_aes = "../third_party/micro-AES"
 
@@ -84,6 +87,11 @@ compartment("aesbench")
     local seed = get_config("aesbench-seed")
     if type(seed) ~= "nil" and seed ~= "" then
         add_defines("AESBENCH_SEED=" .. seed)
+    end
+
+    local log_data = get_config("aesbench-log-data")
+    if type(log_data) ~= "nil" and log_data ~= "" then
+        add_defines("AESBENCH_LOG_DATA=" .. log_data)
     end
 
     -- micro-AES Configuration
