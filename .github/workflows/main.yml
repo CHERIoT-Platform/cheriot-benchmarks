@@ -32,7 +32,7 @@ jobs:
     strategy:
       matrix:
         build-type: [ debug, release ]
-        board: [ sail ]
+        board: [ sail, ibex-safe-simulator, kudu-safe-simulator ]
         benchmark: [ aes ]
         include:
           - benchmark: aes
