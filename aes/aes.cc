@@ -15,6 +15,7 @@
 #include <platform-rdcycle.h>
 
 #include <bearssl_block.h>
+#include <mbedtls/private/aes.h>
 #include <micro_aes.h>
 
 #ifndef DEBUG_AESBENCH
@@ -102,6 +103,8 @@ const uint8_t Seed = AESBENCH_SEED;
 class AesImpl
 {
 	public:
+	virtual ~AesImpl() = default;
+
 	/*
 	    Check that a key size is usable for this implementation
 	*/
@@ -253,6 +256,88 @@ class MicroAes128CbcImpl : public AesImpl
 	{ return "micro-AES.128.CBC"; }
 };
 
+class MbedtlsAesCbcImpl : public AesImpl
+{
+	mbedtls_aes_context ctx;
+	const uint8_t      *key;
+	size_t              keySizeBits;
+
+	public:
+	MbedtlsAesCbcImpl()
+	{ mbedtls_aes_init(&ctx); }
+
+	~MbedtlsAesCbcImpl() override
+	{ mbedtls_aes_free(&ctx); }
+
+	bool supports_key_size(size_t keySize) override
+	{
+		switch (keySize)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void set_key(const uint8_t *key, size_t keySizeBytes) override
+	{
+		this->key         = key;
+		this->keySizeBits = keySizeBytes * 8;
+	}
+
+	void encrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *plaintext,
+	                   size_t         plainTextSize,
+	                   uint8_t       *ciphertext) override
+	{
+		// mbedtls updates iv in-place
+		uint8_t workingIv[AES_CBC_IV_SIZE];
+		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
+
+		int ret;
+
+		ret = mbedtls_aes_setkey_enc(&ctx, key, keySizeBits);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
+
+		ret = mbedtls_aes_crypt_cbc(&ctx,
+		                            MBEDTLS_AES_ENCRYPT,
+		                            plainTextSize,
+		                            workingIv,
+		                            plaintext,
+		                            ciphertext);
+		Debug::Invariant(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
+	}
+
+	void decrypt_bytes(const uint8_t *iv,
+	                   const uint8_t *ciphertext,
+	                   size_t         ciphertextSize,
+	                   uint8_t       *plaintext) override
+	{
+		// mbedtls updates iv in-place
+		uint8_t workingIv[AES_CBC_IV_SIZE];
+		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
+
+		int ret;
+
+		ret = mbedtls_aes_setkey_dec(&ctx, key, keySizeBits);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
+
+		ret = mbedtls_aes_crypt_cbc(&ctx,
+		                            MBEDTLS_AES_DECRYPT,
+		                            ciphertextSize,
+		                            workingIv,
+		                            ciphertext,
+		                            plaintext);
+		Debug::Invariant(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
+	}
+
+	const char *get_name() override
+	{ return "mbedtls.CBC"; }
+};
+
 /*
     Helper class for implementations using the same function for encryption and
     decryption
@@ -365,6 +450,77 @@ class MicroAes128CtrImpl : public AesSymmetricImpl
 	{ return "micro-AES.128.CTR"; }
 };
 
+class MbedtlsAesCtrImpl : public AesSymmetricImpl
+{
+	mbedtls_aes_context ctx;
+	const uint8_t      *key;
+	size_t              keySizeBits;
+
+	public:
+	MbedtlsAesCtrImpl()
+	{ mbedtls_aes_init(&ctx); }
+
+	~MbedtlsAesCtrImpl() override
+	{ mbedtls_aes_free(&ctx); }
+
+	bool supports_key_size(size_t keySize) override
+	{
+		switch (keySize)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void set_key(const uint8_t *key, size_t keySizeBytes) override
+	{
+		this->key         = key;
+		this->keySizeBits = keySizeBytes * 8;
+	}
+
+	void run(const uint8_t *iv,
+	         const uint8_t *plaintext,
+	         size_t         plainTextSize,
+	         uint8_t       *ciphertext) override
+	{
+		// mbedtls updates iv in-place
+		uint8_t workingIv[AES_CTR_IV_SIZE + 4];
+		memcpy(workingIv, iv, AES_CTR_IV_SIZE);
+
+		// mbedtls stores counter with the iv
+		// Initialise to same value as micro-AES
+		workingIv[12] = 0;
+		workingIv[13] = 0;
+		workingIv[14] = 0;
+		workingIv[15] = 1;
+
+		int ret;
+
+		ret = mbedtls_aes_setkey_enc(&ctx, key, keySizeBits);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
+
+		uint8_t streamBlock[16];
+		memset(streamBlock, 0, sizeof streamBlock);
+
+		size_t ncOff = 0;
+		ret          = mbedtls_aes_crypt_ctr(&ctx,
+		                                     plainTextSize,
+		                                     &ncOff,
+		                                     workingIv,
+		                                     streamBlock,
+		                                     plaintext,
+		                                     ciphertext);
+		Debug::Invariant(ret == 0, "mbedtls_aes_crypt_ctr={}", ret);
+	}
+
+	const char *get_name() override
+	{ return "mbedtls.CTR"; }
+};
+
 static std::pair<int, int> test(AesImpl       &impl,
                                 const uint8_t *plaintext,
                                 size_t         plaintextSize,
@@ -423,6 +579,19 @@ static std::pair<int, int> test(AesImpl       &impl,
 	};
 }
 
+/*
+    mbedtls generates tables the first time AES is called
+*/
+static void warmup_mbedtls()
+{
+	constexpr size_t KeySizeBits  = 128;
+	constexpr size_t KeySizeBytes = KeySizeBits / 8;
+
+	mbedtls_aes_context ctx;
+	uint8_t             key[KeySizeBytes];
+	mbedtls_aes_setkey_enc(&ctx, key, KeySizeBits);
+}
+
 static void
 fill_random_bytes(ds::xoroshiro::P16R8 &rand, uint8_t *buffer, size_t length)
 {
@@ -450,7 +619,12 @@ int __cheri_compartment("aesbench") run()
 
 	  new MicroAes128CbcImpl(),
 	  new MicroAes128CtrImpl(),
+
+	  new MbedtlsAesCbcImpl(),
+	  new MbedtlsAesCtrImpl(),
 	};
+
+	warmup_mbedtls();
 
 	printf("#board\t"
 	       "plaintextSize\t"

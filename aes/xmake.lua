@@ -35,6 +35,7 @@ option("aesbench-log-data")
 
 bearssl = "../third_party/BearSSL"
 micro_aes = "../third_party/micro-AES"
+mbedtls_crypto = "../third_party/mbedtls-crypto"
 
 debugOption("aesbench");
 compartment("aesbench")
@@ -97,6 +98,31 @@ compartment("aesbench")
     -- micro-AES Configuration
     add_sysincludedirs(micro_aes)
     add_files(micro_aes .. "/micro_aes.c")
+
+    -- mbedtls Configuration
+    add_includedirs("mbedtls_config")
+    add_defines(
+        "TF_PSA_CRYPTO_CONFIG_FILE=<mbedtls_crypto_config.h>",
+
+        "MBEDTLS_PLATFORM_HAS_EXPLICIT_BZERO",
+        "MBEDTLS_AES_C",
+        "MBEDTLS_CIPHER_MODE_CBC",
+        "MBEDTLS_CIPHER_MODE_CTR",
+
+        "MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS"
+    )
+    add_sysincludedirs(mbedtls_crypto .. "/include")
+    add_sysincludedirs(mbedtls_crypto .. "/drivers/builtin/include")
+    add_sysincludedirs(mbedtls_crypto .. "/include")
+    add_sysincludedirs(mbedtls_crypto .. "/drivers/builtin/include")
+    add_sysincludedirs(mbedtls_crypto .. "/core")
+    add_sysincludedirs(mbedtls_crypto .. "/core")
+    add_sysincludedirs(mbedtls_crypto .. "/dispatch")
+    add_sysincludedirs(mbedtls_crypto .. "/extras")
+    add_sysincludedirs(mbedtls_crypto .. "/platform")
+    add_sysincludedirs(mbedtls_crypto .. "/utilities")
+    add_files(mbedtls_crypto .. "/platform/platform_util.c")
+    add_files(mbedtls_crypto .. "/drivers/builtin/src/aes.c")
 
     -- BearSSL Configuration
     add_defines("BR_INT128=0", "BR_UMUL128=0", "BR_USE_UNIX_TIME=1")

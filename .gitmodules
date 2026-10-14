@@ -7,3 +7,6 @@
 [submodule "third_party/micro-AES"]
 	path = third_party/micro-AES
 	url = https://github.com/polfosol/micro-AES.git
+[submodule "third_party/TF-PSA-Crypto"]
+	path = third_party/mbedtls-crypto
+	url = https://github.com/Mbed-TLS/TF-PSA-Crypto
