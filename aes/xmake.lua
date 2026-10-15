@@ -43,7 +43,6 @@ compartment("aesbench")
 
     -- Allow allocating an effectively unbounded amount of memory (more than exists)
     add_rules("cheriot.component-debug")
-	add_deps("unwind_error_handler")
     add_defines("MALLOC_QUOTA=1000000")
     add_defines("BOARD=" .. tostring(get_config("board")))
 
