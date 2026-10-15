@@ -604,24 +604,24 @@ int __cheri_compartment("aesbench") run()
 	ds::xoroshiro::P16R8  rand8(Seed);
 	ds::xoroshiro::P64R32 rand32(Seed);
 
-	AesImpl *const Implementations[]{
+	const std::unique_ptr<AesImpl> Implementations[]{
 	  // optimised for code size, non-constant time
-	  new BearAesSmallCbc(),
-	  new BearAesSmallCtr(),
+	  std::make_unique<BearAesSmallCbc>(),
+	  std::make_unique<BearAesSmallCtr>(),
 
 	  // table based, fast, non-constant time
-	  new BearAesBigCbc(),
-	  new BearAesBigCtr(),
+	  std::make_unique<BearAesBigCbc>(),
+	  std::make_unique<BearAesBigCtr>(),
 
 	  // constant-time, but slower than big
-	  new BearAesCtCbc(),
-	  new BearAesCtCtr(),
+	  std::make_unique<BearAesCtCbc>(),
+	  std::make_unique<BearAesCtCtr>(),
 
-	  new MicroAes128CbcImpl(),
-	  new MicroAes128CtrImpl(),
+	  std::make_unique<MicroAes128CbcImpl>(),
+	  std::make_unique<MicroAes128CtrImpl>(),
 
-	  new MbedtlsAesCbcImpl(),
-	  new MbedtlsAesCtrImpl(),
+	  std::make_unique<MbedtlsAesCbcImpl>(),
+	  std::make_unique<MbedtlsAesCtrImpl>(),
 	};
 
 	warmup_mbedtls();
@@ -674,7 +674,8 @@ int __cheri_compartment("aesbench") run()
 						// a subsection of this array for that
 						static_assert(AES_CTR_IV_SIZE < AES_CBC_IV_SIZE);
 
-						for (AesImpl *impl : Implementations)
+						for (const std::unique_ptr<AesImpl> &impl :
+						     Implementations)
 						{
 							if (!impl->supports_key_size(keySize))
 								continue;
