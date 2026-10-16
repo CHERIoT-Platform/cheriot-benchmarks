@@ -566,6 +566,7 @@ static uint8_t decryptedPlaintextBuffer[MaximumSize];
  * @param key key to encrypt with
  * @param keySizeBytes length of key buffer in bytes
  * @param startIv initial iv value
+ * @return pair of encryption time and decryption time in cycles
  */
 static std::pair<int, int> test(AesImpl       &impl,
                                 const uint8_t *plaintext,
