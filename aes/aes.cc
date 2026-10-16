@@ -117,20 +117,25 @@ class AesImpl
 	virtual void set_key(const uint8_t *key, size_t keySize) = 0;
 
 	/*
-	    Encrypt plaintext
+	    Encrypt plaintext.
+	    ciphertext should be initialised with the same contents as plaintext to
+	    allow some implementations to work in-place (ex. BearSSL).
 	    Implementations may require that plaintext and ciphertext do not overlap
-	    (ex. micro-AES)
+	    (ex. micro-AES), and may overwrite iv in-place.
 	*/
-	virtual void encrypt_bytes(const uint8_t *iv,
+	virtual void encrypt_bytes(uint8_t       *iv,
 	                           const uint8_t *plaintext,
 	                           size_t         plainTextSize,
 	                           uint8_t       *ciphertext) = 0;
 
 	/*
+	    Decrypt ciphertext.
+	    plaintext should be initialised with the same contents as ciphertext to
+	    allow some implementations to work in-place (ex. BearSSL).
 	    Implementations may require that plaintext and ciphertext do not overlap
-	    (ex. micro-AES)
+	    (ex. micro-AES), and may overwrite iv in-place.
 	*/
-	virtual void decrypt_bytes(const uint8_t *iv,
+	virtual void decrypt_bytes(uint8_t       *iv,
 	                           const uint8_t *ciphertext,
 	                           size_t         ciphertextSize,
 	                           uint8_t       *plaintext) = 0;
@@ -139,6 +144,15 @@ class AesImpl
 	    Get the name of the implementation used
 	*/
 	virtual const char *get_name() = 0;
+
+	/*
+	    Initialise a working copy of the iv
+	    Even for CTR implementations, these must be buffers big enough for a CBC
+	    IV, as some still use the extra space (ex. mbedtls)
+	*/
+	virtual void init_working_iv(const uint8_t iv[AES_CBC_IV_SIZE],
+	                             uint8_t       workingIv[AES_CBC_IV_SIZE])
+	{ memcpy(workingIv, iv, AES_CBC_IV_SIZE); }
 };
 
 template<typename EncCtx,
@@ -172,30 +186,28 @@ class BearSslAesCbcImpl : public AesImpl
 		DecInitFunc(&decCtx, key, keySize);
 	}
 
-	void encrypt_bytes(const uint8_t *iv,
+	void encrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *plaintext,
 	                   size_t         plainTextSize,
 	                   uint8_t       *ciphertext) override
 	{
 		// BearSSL works in-place
-		memcpy(ciphertext, plaintext, plainTextSize);
-		uint8_t workingIv[AES_CBC_IV_SIZE];
-		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
+		Debug::Assert(memcmp(ciphertext, plaintext, plainTextSize) == 0,
+		              "ciphertext must be initialised equal to plaintext");
 
-		EncRunFunc(&encCtx, workingIv, ciphertext, plainTextSize);
+		EncRunFunc(&encCtx, iv, ciphertext, plainTextSize);
 	}
 
-	void decrypt_bytes(const uint8_t *iv,
+	void decrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *ciphertext,
 	                   size_t         ciphertextSize,
 	                   uint8_t       *plaintext) override
 	{
 		// BearSSL works in-place
-		memcpy(plaintext, ciphertext, ciphertextSize);
-		uint8_t workingIv[AES_CBC_IV_SIZE];
-		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
+		Debug::Assert(memcmp(plaintext, ciphertext, ciphertextSize) == 0,
+		              "plaintext must be initialised equal to ciphertext");
 
-		DecRunFunc(&decCtx, workingIv, plaintext, ciphertextSize);
+		DecRunFunc(&decCtx, iv, plaintext, ciphertextSize);
 	}
 
 	const char *get_name() override
@@ -240,13 +252,13 @@ class MicroAes128CbcImpl : public AesImpl
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ this->key = key; }
 
-	void encrypt_bytes(const uint8_t *iv,
+	void encrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *plaintext,
 	                   size_t         plainTextSize,
 	                   uint8_t       *ciphertext) override
 	{ AES_CBC_encrypt(key, iv, plaintext, plainTextSize, ciphertext); }
 
-	void decrypt_bytes(const uint8_t *iv,
+	void decrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *ciphertext,
 	                   size_t         ciphertextSize,
 	                   uint8_t       *plaintext) override
@@ -258,16 +270,21 @@ class MicroAes128CbcImpl : public AesImpl
 
 class MbedtlsAesCbcImpl : public AesImpl
 {
-	mbedtls_aes_context ctx;
-	const uint8_t      *key;
-	size_t              keySizeBits;
+	mbedtls_aes_context encCtx;
+	mbedtls_aes_context decCtx;
 
 	public:
 	MbedtlsAesCbcImpl()
-	{ mbedtls_aes_init(&ctx); }
+	{
+		mbedtls_aes_init(&encCtx);
+		mbedtls_aes_init(&decCtx);
+	}
 
 	~MbedtlsAesCbcImpl() override
-	{ mbedtls_aes_free(&ctx); }
+	{
+		mbedtls_aes_free(&encCtx);
+		mbedtls_aes_free(&decCtx);
+	}
 
 	bool supports_key_size(size_t keySize) override
 	{
@@ -284,54 +301,43 @@ class MbedtlsAesCbcImpl : public AesImpl
 
 	void set_key(const uint8_t *key, size_t keySizeBytes) override
 	{
-		this->key         = key;
-		this->keySizeBits = keySizeBytes * 8;
+		size_t keySizeBits = keySizeBytes * 8;
+
+		int ret;
+
+		ret = mbedtls_aes_setkey_enc(&encCtx, key, keySizeBits);
+		Debug::Assert(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
+
+		ret = mbedtls_aes_setkey_dec(&decCtx, key, keySizeBits);
+		Debug::Assert(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
 	}
 
-	void encrypt_bytes(const uint8_t *iv,
+	void encrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *plaintext,
 	                   size_t         plainTextSize,
 	                   uint8_t       *ciphertext) override
 	{
-		// mbedtls updates iv in-place
-		uint8_t workingIv[AES_CBC_IV_SIZE];
-		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
-
-		int ret;
-
-		ret = mbedtls_aes_setkey_enc(&ctx, key, keySizeBits);
-		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
-
-		ret = mbedtls_aes_crypt_cbc(&ctx,
-		                            MBEDTLS_AES_ENCRYPT,
-		                            plainTextSize,
-		                            workingIv,
-		                            plaintext,
-		                            ciphertext);
-		Debug::Invariant(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
+		int ret = mbedtls_aes_crypt_cbc(&encCtx,
+		                                MBEDTLS_AES_ENCRYPT,
+		                                plainTextSize,
+		                                iv,
+		                                plaintext,
+		                                ciphertext);
+		Debug::Assert(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
 	}
 
-	void decrypt_bytes(const uint8_t *iv,
+	void decrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *ciphertext,
 	                   size_t         ciphertextSize,
 	                   uint8_t       *plaintext) override
 	{
-		// mbedtls updates iv in-place
-		uint8_t workingIv[AES_CBC_IV_SIZE];
-		memcpy(workingIv, iv, AES_CBC_IV_SIZE);
-
-		int ret;
-
-		ret = mbedtls_aes_setkey_dec(&ctx, key, keySizeBits);
-		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
-
-		ret = mbedtls_aes_crypt_cbc(&ctx,
-		                            MBEDTLS_AES_DECRYPT,
-		                            ciphertextSize,
-		                            workingIv,
-		                            ciphertext,
-		                            plaintext);
-		Debug::Invariant(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
+		int ret = mbedtls_aes_crypt_cbc(&decCtx,
+		                                MBEDTLS_AES_DECRYPT,
+		                                ciphertextSize,
+		                                iv,
+		                                ciphertext,
+		                                plaintext);
+		Debug::Assert(ret == 0, "mbedtls_aes_crypt_cbc={}", ret);
 	}
 
 	const char *get_name() override
@@ -347,18 +353,18 @@ class AesSymmetricImpl : public AesImpl
 	/*
 	    Encrypt/decrypt inText to outText
 	*/
-	virtual void run(const uint8_t *iv,
+	virtual void run(uint8_t       *iv,
 	                 const uint8_t *inText,
 	                 size_t         inTextSize,
 	                 uint8_t       *outText) = 0;
 
-	void encrypt_bytes(const uint8_t *iv,
+	void encrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *plaintext,
 	                   size_t         plainTextSize,
 	                   uint8_t       *ciphertext) override
 	{ run(iv, plaintext, plainTextSize, ciphertext); }
 
-	void decrypt_bytes(const uint8_t *iv,
+	void decrypt_bytes(uint8_t       *iv,
 	                   const uint8_t *ciphertext,
 	                   size_t         ciphertextSize,
 	                   uint8_t       *plaintext) override
@@ -393,13 +399,14 @@ class BearSslAesCtrImpl : public AesSymmetricImpl
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ InitFunc(&ctx, key, keySize); }
 
-	void run(const uint8_t *iv,
+	void run(uint8_t       *iv,
 	         const uint8_t *inText,
 	         size_t         inTextSize,
 	         uint8_t       *outText) override
 	{
 		// BearSSL works in-place
-		memcpy(outText, inText, inTextSize);
+		Debug::Assert(memcmp(outText, inText, inTextSize) == 0,
+		              "ciphertext must be initialised equal to plaintext");
 
 		// Use the same counter start value as micro-AES
 		uint32_t cc = 1;
@@ -440,7 +447,7 @@ class MicroAes128CtrImpl : public AesSymmetricImpl
 	void set_key(const uint8_t *key, size_t keySize) override
 	{ this->key = key; }
 
-	void run(const uint8_t *iv,
+	void run(uint8_t       *iv,
 	         const uint8_t *inText,
 	         size_t         inTextSize,
 	         uint8_t       *outText) override
@@ -452,16 +459,24 @@ class MicroAes128CtrImpl : public AesSymmetricImpl
 
 class MbedtlsAesCtrImpl : public AesSymmetricImpl
 {
-	mbedtls_aes_context ctx;
-	const uint8_t      *key;
-	size_t              keySizeBits;
+	mbedtls_aes_context encCtx;
+	mbedtls_aes_context decCtx;
+
+	// Scratch space required for intermediate values by the library
+	uint8_t streamBlock[16];
 
 	public:
 	MbedtlsAesCtrImpl()
-	{ mbedtls_aes_init(&ctx); }
+	{
+		mbedtls_aes_init(&encCtx);
+		mbedtls_aes_init(&decCtx);
+	}
 
 	~MbedtlsAesCtrImpl() override
-	{ mbedtls_aes_free(&ctx); }
+	{
+		mbedtls_aes_free(&encCtx);
+		mbedtls_aes_free(&decCtx);
+	}
 
 	bool supports_key_size(size_t keySize) override
 	{
@@ -478,17 +493,19 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
 
 	void set_key(const uint8_t *key, size_t keySizeBytes) override
 	{
-		this->key         = key;
-		this->keySizeBits = keySizeBytes * 8;
+		size_t keySizeBits = keySizeBytes * 8;
+
+		int ret;
+
+		ret = mbedtls_aes_setkey_enc(&encCtx, key, keySizeBits);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
+
+		ret = mbedtls_aes_setkey_dec(&decCtx, key, keySizeBits);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
 	}
 
-	void run(const uint8_t *iv,
-	         const uint8_t *plaintext,
-	         size_t         plainTextSize,
-	         uint8_t       *ciphertext) override
+	void init_working_iv(const uint8_t *iv, uint8_t *workingIv) override
 	{
-		// mbedtls updates iv in-place
-		uint8_t workingIv[AES_CTR_IV_SIZE + 4];
 		memcpy(workingIv, iv, AES_CTR_IV_SIZE);
 
 		// mbedtls stores counter with the iv
@@ -497,20 +514,20 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
 		workingIv[13] = 0;
 		workingIv[14] = 0;
 		workingIv[15] = 1;
+	}
 
+	void run(uint8_t       *iv,
+	         const uint8_t *plaintext,
+	         size_t         plainTextSize,
+	         uint8_t       *ciphertext) override
+	{
 		int ret;
 
-		ret = mbedtls_aes_setkey_enc(&ctx, key, keySizeBits);
-		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
-
-		uint8_t streamBlock[16];
-		memset(streamBlock, 0, sizeof streamBlock);
-
 		size_t ncOff = 0;
-		ret          = mbedtls_aes_crypt_ctr(&ctx,
+		ret          = mbedtls_aes_crypt_ctr(&encCtx,
 		                                     plainTextSize,
 		                                     &ncOff,
-		                                     workingIv,
+		                                     iv,
 		                                     streamBlock,
 		                                     plaintext,
 		                                     ciphertext);
@@ -537,9 +554,13 @@ static std::pair<int, int> test(AesImpl       &impl,
 	Debug::Assert(decryptedPlaintext != nullptr,
 	              "Couldn't allocate decryptedPlaintext");
 
+	uint8_t workingIv[AES_CBC_IV_SIZE];
+
 	// Encrypt buffer
+	memcpy(ciphertext.get(), plaintext, plaintextSize);
+	impl.init_working_iv(startIv, workingIv);
 	auto encStart = rdcycle();
-	impl.encrypt_bytes(startIv, plaintext, plaintextSize, ciphertext.get());
+	impl.encrypt_bytes(workingIv, plaintext, plaintextSize, ciphertext.get());
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
@@ -551,9 +572,11 @@ static std::pair<int, int> test(AesImpl       &impl,
 #endif
 
 	// Decrypt buffer
+	memcpy(decryptedPlaintext.get(), ciphertext.get(), plaintextSize);
+	impl.init_working_iv(startIv, workingIv);
 	auto decStart = rdcycle();
 	impl.decrypt_bytes(
-	  startIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
+	  workingIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
