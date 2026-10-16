@@ -69,6 +69,14 @@ const size_t KeySizes[] = {
   256,
 #endif
 };
+const size_t MaximumKeySize =
+#if AESBENCH_ENABLE_AES256 == 1
+  256;
+#elif AESBENCH_ENABLE_AES192 == 1
+  192;
+#elif AESBENCH_ENABLE_AES128 == 1
+  128;
+#endif
 
 // Number of keys to test per key size
 #ifndef AESBENCH_KEY_COUNT
@@ -538,59 +546,56 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
 	{ return "mbedtls.CTR"; }
 };
 
+static uint8_t keyBuffer[MaximumKeySize];
+static uint8_t plaintextBuffer[MaximumSize];
+static uint8_t ciphertextBuffer[MaximumSize];
+static uint8_t decryptedPlaintextBuffer[MaximumSize];
+
 static std::pair<int, int> test(AesImpl       &impl,
-                                const uint8_t *plaintext,
                                 size_t         plaintextSize,
-                                const uint8_t *key,
                                 size_t         keySizeBytes,
                                 const uint8_t *startIv)
 {
-	impl.set_key(key, keySizeBytes);
-
-	auto ciphertext = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(ciphertext != nullptr, "Couldn't allocate ciphertext");
-
-	auto decryptedPlaintext = std::make_unique<uint8_t[]>(plaintextSize);
-	Debug::Assert(decryptedPlaintext != nullptr,
-	              "Couldn't allocate decryptedPlaintext");
+	impl.set_key(keyBuffer, keySizeBytes);
 
 	uint8_t workingIv[AES_CBC_IV_SIZE];
 
 	// Encrypt buffer
-	memcpy(ciphertext.get(), plaintext, plaintextSize);
+	memcpy(ciphertextBuffer, plaintextBuffer, plaintextSize);
 	impl.init_working_iv(startIv, workingIv);
 	auto encStart = rdcycle();
-	impl.encrypt_bytes(workingIv, plaintext, plaintextSize, ciphertext.get());
+	impl.encrypt_bytes(
+	  workingIv, plaintextBuffer, plaintextSize, ciphertextBuffer);
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 #if AESBENCH_LOG_DATA == 1
 	fprintf(stderr, "%s Ciphertext: ", impl.get_name());
 	for (size_t i = 0; i < plaintextSize; i++)
-		fprintf(stderr, "%02x ", ciphertext[i]);
+		fprintf(stderr, "%02x ", ciphertextBuffer[i]);
 	fprintf(stderr, "\n");
 #endif
 
 	// Decrypt buffer
-	memcpy(decryptedPlaintext.get(), ciphertext.get(), plaintextSize);
+	memcpy(decryptedPlaintextBuffer, ciphertextBuffer, plaintextSize);
 	impl.init_working_iv(startIv, workingIv);
 	auto decStart = rdcycle();
 	impl.decrypt_bytes(
-	  workingIv, ciphertext.get(), plaintextSize, decryptedPlaintext.get());
+	  workingIv, ciphertextBuffer, plaintextSize, decryptedPlaintextBuffer);
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 #if AESBENCH_LOG_DATA == 1
 	fprintf(stderr, "%s Decrypted Plaintext: ", impl.get_name());
 	for (size_t i = 0; i < plaintextSize; i++)
-		fprintf(stderr, "%02x ", decryptedPlaintext[i]);
+		fprintf(stderr, "%02x ", decryptedPlaintextBuffer[i]);
 	fprintf(stderr, "\n");
 #endif
 
 	// Check the output matches the original plaintext
 	for (int i = 0; i < plaintextSize; i++)
 	{
-		Debug::Invariant(plaintext[i] == decryptedPlaintext[i],
+		Debug::Invariant(plaintextBuffer[i] == decryptedPlaintextBuffer[i],
 		                 "{} byte {} was not a round trip",
 		                 impl.get_name(),
 		                 i);
@@ -663,30 +668,25 @@ int __cheri_compartment("aesbench") run()
 	for (size_t plaintextSize = MinimumSize; plaintextSize <= MaximumSize;
 	     plaintextSize <<= 1)
 	{
-		auto plaintext = std::make_unique<uint8_t[]>(plaintextSize);
-		Debug::Assert(plaintext != nullptr, "Couldn't allocate plaintext");
-
 		for (size_t plaintextId = 0; plaintextId < PlaintextCount;
 		     plaintextId++)
 		{
-			fill_random_bytes(rand8, plaintext.get(), plaintextSize);
+			fill_random_bytes(rand8, plaintextBuffer, plaintextSize);
 
 #if AESBENCH_LOG_DATA == 1
 			fprintf(stderr, "Plaintext: ");
 			for (size_t i = 0; i < plaintextSize; i++)
-				fprintf(stderr, "%02x ", plaintext[i]);
+				fprintf(stderr, "%02x ", plaintextBuffer[i]);
 			fprintf(stderr, "\n");
 #endif
 
 			for (size_t keySize : KeySizes)
 			{
 				size_t keySizeBytes = keySize / 8;
-				auto   key          = std::make_unique<uint8_t[]>(keySizeBytes);
-				Debug::Assert(key != nullptr, "Couldn't allocate key");
 
 				for (size_t keyId = 0; keyId < KeyCount; keyId++)
 				{
-					fill_random_bytes(rand8, key.get(), keySizeBytes);
+					fill_random_bytes(rand8, keyBuffer, keySizeBytes);
 
 					for (size_t ivId = 0; ivId < IvCount; ivId++)
 					{
@@ -707,13 +707,8 @@ int __cheri_compartment("aesbench") run()
 							     repetition < RepeatCount;
 							     repetition++)
 							{
-								auto [encRuntime, decRuntime] =
-								  test(*impl,
-								       plaintext.get(),
-								       plaintextSize,
-								       key.get(),
-								       keySizeBytes,
-								       startIv);
+								auto [encRuntime, decRuntime] = test(
+								  *impl, plaintextSize, keySizeBytes, startIv);
 								printf("%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
 								       "s\t%d\t%d\n",
 								       __XSTRING(BOARD),
