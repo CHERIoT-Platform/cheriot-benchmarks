@@ -7,6 +7,7 @@
 #include <memory>
 
 #include <allocator.h>
+#include <cheri.hh>
 #include <compartment.h>
 #include <debug.hh>
 #include <ds/xoroshiro.h>
@@ -554,60 +555,69 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
     Benchmarking code
 */
 
-static uint8_t keyBuffer[MaximumKeySize];
-static uint8_t plaintextBuffer[MaximumSize];
 static uint8_t ciphertextBuffer[MaximumSize];
 static uint8_t decryptedPlaintextBuffer[MaximumSize];
 
-/*
- * Time the encryption and decryption of an AES implementation on the current
- * contents of plaintextBuffer, up to bufferSize, and keyBuffer
+/**
+ * Time the encryption and decryption of an AES implementation
+ * @param impl the implementation to test
+ * @param plaintext data to encrypt
+ * @param plaintextSize length of plaintext buffer
+ * @param key key to encrypt with
+ * @param keySizeBytes length of key buffer in bytes
+ * @param startIv initial iv value
  */
 static std::pair<int, int> test(AesImpl       &impl,
-                                size_t         bufferSize,
+                                const uint8_t *plaintext,
+                                size_t         plaintextSize,
+                                const uint8_t *key,
                                 size_t         keySizeBytes,
                                 const uint8_t *startIv)
 {
-	impl.set_key(keyBuffer, keySizeBytes);
+	size_t            bufferSize = plaintextSize;
+	CHERI::Capability ciphertext{ciphertextBuffer};
+	ciphertext.bounds() = bufferSize;
+	CHERI::Capability decryptedPlaintext{decryptedPlaintextBuffer};
+	ciphertext.bounds() = bufferSize;
+
+	impl.set_key(key, keySizeBytes);
 
 	uint8_t workingIv[AES_CBC_IV_SIZE];
 
 	// Encrypt buffer
-	memcpy(ciphertextBuffer, plaintextBuffer, bufferSize);
+	memcpy(ciphertext, plaintext, bufferSize);
 	impl.init_working_iv(startIv, workingIv);
 	auto encStart = rdcycle();
-	impl.encrypt_bytes(
-	  workingIv, bufferSize, plaintextBuffer, ciphertextBuffer);
+	impl.encrypt_bytes(workingIv, bufferSize, plaintext, ciphertext);
 	auto encEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 #if AESBENCH_LOG_DATA == 1
 	fprintf(stderr, "%s Ciphertext: ", impl.get_name());
 	for (size_t i = 0; i < bufferSize; i++)
-		fprintf(stderr, "%02x ", ciphertextBuffer[i]);
+		fprintf(stderr, "%02x ", ciphertext[i]);
 	fprintf(stderr, "\n");
 #endif
 
 	// Decrypt buffer
-	memcpy(decryptedPlaintextBuffer, ciphertextBuffer, bufferSize);
+	memcpy(decryptedPlaintext, ciphertext, bufferSize);
 	impl.init_working_iv(startIv, workingIv);
 	auto decStart = rdcycle();
-	impl.decrypt_bytes(
-	  workingIv, bufferSize, ciphertextBuffer, decryptedPlaintextBuffer);
+	impl.decrypt_bytes(workingIv, bufferSize, ciphertext, decryptedPlaintext);
 	auto decEnd = rdcycle();
 	asm volatile("" : : : "memory");
 
 #if AESBENCH_LOG_DATA == 1
 	fprintf(stderr, "%s Decrypted Plaintext: ", impl.get_name());
 	for (size_t i = 0; i < bufferSize; i++)
-		fprintf(stderr, "%02x ", decryptedPlaintextBuffer[i]);
+		fprintf(stderr, "%02x ", decryptedPlaintext[i]);
 	fprintf(stderr, "\n");
 #endif
 
 	// Check the output matches the original plaintext
 	for (int i = 0; i < bufferSize; i++)
 	{
-		Debug::Invariant(plaintextBuffer[i] == decryptedPlaintextBuffer[i],
+		Debug::Invariant(plaintext[i] == decryptedPlaintext[i],
 		                 "{} byte {} was not a round trip",
 		                 impl.get_name(),
 		                 i);
@@ -639,6 +649,9 @@ fill_random_bytes(ds::xoroshiro::P16R8 &rand, uint8_t *buffer, size_t length)
 	for (size_t i = 0; i < length; i++)
 		buffer[i] = rand.next();
 }
+
+static uint8_t keyBuffer[MaximumKeySize];
+static uint8_t plaintextBuffer[MaximumSize];
 
 int __cheri_compartment("aesbench") run()
 {
@@ -681,15 +694,18 @@ int __cheri_compartment("aesbench") run()
 	for (size_t plaintextSize = MinimumSize; plaintextSize <= MaximumSize;
 	     plaintextSize <<= 1)
 	{
+		CHERI::Capability plaintext{plaintextBuffer};
+		plaintext.bounds() = plaintextSize;
+
 		for (size_t plaintextId = 0; plaintextId < PlaintextCount;
 		     plaintextId++)
 		{
-			fill_random_bytes(rand8, plaintextBuffer, plaintextSize);
+			fill_random_bytes(rand8, plaintext, plaintextSize);
 
 #if AESBENCH_LOG_DATA == 1
 			fprintf(stderr, "Plaintext: ");
 			for (size_t i = 0; i < plaintextSize; i++)
-				fprintf(stderr, "%02x ", plaintextBuffer[i]);
+				fprintf(stderr, "%02x ", plaintext[i]);
 			fprintf(stderr, "\n");
 #endif
 
@@ -697,9 +713,12 @@ int __cheri_compartment("aesbench") run()
 			{
 				size_t keySizeBytes = keySizeBits / 8;
 
+				CHERI::Capability key{keyBuffer};
+				key.bounds() = keySizeBytes;
+
 				for (size_t keyId = 0; keyId < KeyCount; keyId++)
 				{
-					fill_random_bytes(rand8, keyBuffer, keySizeBytes);
+					fill_random_bytes(rand8, key, keySizeBytes);
 
 					for (size_t ivId = 0; ivId < IvCount; ivId++)
 					{
@@ -720,8 +739,13 @@ int __cheri_compartment("aesbench") run()
 							     repetition < RepeatCount;
 							     repetition++)
 							{
-								auto [encRuntime, decRuntime] = test(
-								  *impl, plaintextSize, keySizeBytes, startIv);
+								auto [encRuntime, decRuntime] =
+								  test(*impl,
+								       plaintext,
+								       plaintextSize,
+								       key,
+								       keySizeBytes,
+								       startIv);
 								printf("%s\t%zu\t%zu\t%zu\t%zu\t%zu\t%zu\t%"
 								       "s\t%d\t%d\n",
 								       __XSTRING(BOARD),
