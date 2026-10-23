@@ -15,6 +15,7 @@
 #include <locks.hh>
 #include <platform-rdcycle.h>
 
+#include <bearssl_aead.h>
 #include <bearssl_block.h>
 #include <mbedtls/private/aes.h>
 #include <micro_aes.h>
@@ -86,6 +87,9 @@ const size_t MaximumKeySize =
 #ifndef AESBENCH_ENABLE_CTR
 #	define AESBENCH_ENABLE_CTR 1
 #endif
+#ifndef AESBENCH_ENABLE_GCM
+#	define AESBENCH_ENABLE_GCM 1
+#endif
 
 // Number of keys to test per key size
 #ifndef AESBENCH_KEY_COUNT
@@ -115,7 +119,12 @@ const uint8_t Seed = AESBENCH_SEED;
 */
 
 #define AES_CBC_IV_SIZE 16
+
 #define AES_CTR_IV_SIZE 12
+
+// GCM in general supports arbitrary-size IVs, but micro-AES only implements
+// this one size, so it is used across all implementations here for consistency
+#define AES_GCM_IV_SIZE 12
 
 /**
  * Generic AES encryption/decryption interface
@@ -559,6 +568,119 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
 	{ return "mbedtls.CTR"; }
 };
 
+template<const br_ghash            GHash,
+         const br_block_ctr_class &Vtable,
+         const char               *Name>
+class BearSslAesGcmImpl : public AesImpl
+{
+	br_gcm_context      encCtx;
+	br_aes_gen_ctr_keys encCtrCtx;
+
+	br_gcm_context      decCtx;
+	br_aes_gen_ctr_keys decCtrCtx;
+
+	public:
+	bool supports_key_size(size_t keySizeBits) override
+	{
+		switch (keySizeBits)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void set_key(const uint8_t *key, size_t keySizeBytes) override
+	{
+		Vtable.init(&encCtrCtx.vtable, key, keySizeBytes);
+		br_gcm_init(&encCtx, &encCtrCtx.vtable, GHash);
+
+		Vtable.init(&decCtrCtx.vtable, key, keySizeBytes);
+		br_gcm_init(&decCtx, &decCtrCtx.vtable, GHash);
+	}
+
+	void encrypt_bytes(uint8_t       *iv,
+	                   size_t         bufferSize,
+	                   const uint8_t *plaintext,
+	                   uint8_t       *ciphertext) override
+	{
+		// BearSSL works in-place
+		Debug::Assert(memcmp(ciphertext, plaintext, bufferSize) == 0,
+		              "ciphertext must be initialised equal to plaintext");
+
+		br_gcm_reset(&encCtx, iv, AES_GCM_IV_SIZE);
+		br_gcm_flip(&encCtx);
+		br_gcm_run(&encCtx, true, ciphertext, bufferSize);
+		// TODO: br_gcm_get_tag?
+	}
+
+	void decrypt_bytes(uint8_t       *iv,
+	                   size_t         bufferSize,
+	                   const uint8_t *ciphertext,
+	                   uint8_t       *plaintext) override
+	{
+		// BearSSL works in-place
+		Debug::Assert(memcmp(plaintext, ciphertext, bufferSize) == 0,
+		              "plaintext must be initialised equal to ciphertext");
+
+		br_gcm_reset(&decCtx, iv, AES_GCM_IV_SIZE);
+		br_gcm_flip(&decCtx);
+		br_gcm_run(&decCtx, false, plaintext, bufferSize);
+		// TODO: br_gcm_check_tag?
+	}
+
+	const char *get_name() override
+	{ return Name; }
+};
+
+const char BearAesSmallGcmCtmulName[] = "BearSSL.aes_small.GCM.ctmul";
+using BearAesSmallGcmCtmul = BearSslAesGcmImpl<br_ghash_ctmul,
+                                               br_aes_small_ctr_vtable,
+                                               BearAesSmallGcmCtmulName>;
+
+const char BearAesSmallGcmCtmul32Name[] = "BearSSL.aes_small.GCM.ctmul32";
+using BearAesSmallGcmCtmul32 = BearSslAesGcmImpl<br_ghash_ctmul32,
+                                                 br_aes_small_ctr_vtable,
+                                                 BearAesSmallGcmCtmul32Name>;
+
+const char BearAesSmallGcmCtmul64Name[] = "BearSSL.aes_small.GCM.ctmul64";
+using BearAesSmallGcmCtmul64 = BearSslAesGcmImpl<br_ghash_ctmul64,
+                                                 br_aes_small_ctr_vtable,
+                                                 BearAesSmallGcmCtmul64Name>;
+
+const char BearAesBigGcmCtmulName[] = "BearSSL.aes_big.GCM.ctmul";
+using BearAesBigGcmCtmul            = BearSslAesGcmImpl<br_ghash_ctmul,
+                                                        br_aes_big_ctr_vtable,
+                                                        BearAesBigGcmCtmulName>;
+
+const char BearAesBigGcmCtmul32Name[] = "BearSSL.aes_big.GCM.ctmul32";
+using BearAesBigGcmCtmul32 = BearSslAesGcmImpl<br_ghash_ctmul32,
+                                               br_aes_big_ctr_vtable,
+                                               BearAesBigGcmCtmul32Name>;
+
+const char BearAesBigGcmCtmul64Name[] = "BearSSL.aes_big.GCM.ctmul64";
+using BearAesBigGcmCtmul64 = BearSslAesGcmImpl<br_ghash_ctmul64,
+                                               br_aes_big_ctr_vtable,
+                                               BearAesBigGcmCtmul64Name>;
+
+const char BearAesCtGcmCtmulName[] = "BearSSL.aes_ct.GCM.ctmul";
+using BearAesCtGcmCtmul            = BearSslAesGcmImpl<br_ghash_ctmul,
+                                                       br_aes_ct_ctr_vtable,
+                                                       BearAesCtGcmCtmulName>;
+
+const char BearAesCtGcmCtmul32Name[] = "BearSSL.aes_ct.GCM.ctmul32";
+using BearAesCtGcmCtmul32 = BearSslAesGcmImpl<br_ghash_ctmul32,
+                                              br_aes_ct_ctr_vtable,
+                                              BearAesCtGcmCtmul32Name>;
+
+const char BearAesCtGcmCtmul64Name[] = "BearSSL.aes_ct.GCM.ctmul64";
+using BearAesCtGcmCtmul64 = BearSslAesGcmImpl<br_ghash_ctmul64,
+                                              br_aes_ct_ctr_vtable,
+                                              BearAesCtGcmCtmul64Name>;
+
 /*
     Benchmarking code
 */
@@ -682,6 +804,19 @@ int __cheri_compartment("aesbench") run()
 	  std::make_unique<MicroAes128CtrImpl>(),
 	  std::make_unique<MbedtlsAesCtrImpl>(),
 #endif
+#if AESBENCH_ENABLE_GCM == 1
+	  std::make_unique<BearAesSmallGcmCtmul>(),
+	  std::make_unique<BearAesSmallGcmCtmul32>(),
+	  std::make_unique<BearAesSmallGcmCtmul64>(),
+	  std::make_unique<BearAesBigGcmCtmul>(),
+	  std::make_unique<BearAesBigGcmCtmul32>(),
+	  std::make_unique<BearAesBigGcmCtmul64>(),
+	  std::make_unique<BearAesCtGcmCtmul>(),
+	  std::make_unique<BearAesCtGcmCtmul32>(),
+	  std::make_unique<BearAesCtGcmCtmul64>(),
+	// std::make_unique<MicroAes128GcmImpl>(),
+	// std::make_unique<MbedtlsAesGcmImpl>(),
+#endif
 	};
 
 	warmup_mbedtls();
@@ -731,9 +866,10 @@ int __cheri_compartment("aesbench") run()
 						uint8_t startIv[AES_CBC_IV_SIZE];
 						fill_random_bytes(rand8, startIv, sizeof startIv);
 
-						// CTR's IV is only 12 bytes, so it's fine to just use
-						// a subsection of this array for that
+						// CTR/GCM IVs are only 12 bytes, so it's fine to just
+						// use a subsection of this array for those
 						static_assert(AES_CTR_IV_SIZE < AES_CBC_IV_SIZE);
+						static_assert(AES_GCM_IV_SIZE < AES_CBC_IV_SIZE);
 
 						for (const std::unique_ptr<AesImpl> &impl :
 						     Implementations)
