@@ -25,6 +25,8 @@ option("aesbench-enable-cbc")
     set_default("")
 option("aesbench-enable-ctr")
     set_default("")
+option("aesbench-enable-gcm")
+    set_default("")
 option("aesbench-key-count")
     set_default("")
 option("aesbench-iv-count")
@@ -83,6 +85,10 @@ compartment("aesbench")
     local enable_ctr = get_config("aesbench-enable-ctr")
     if type(enable_ctr) ~= "nil" and enable_ctr ~= "" then
         add_defines("AESBENCH_ENABLE_CTR=" .. enable_ctr)
+    end
+    local enable_gcm = get_config("aesbench-enable-gcm")
+    if type(enable_gcm) ~= "nil" and enable_gcm ~= "" then
+        add_defines("AESBENCH_ENABLE_GCM=" .. enable_gcm)
     end
     local key_count = get_config("aesbench-key-count")
     if type(key_count) ~= "nil" and key_count ~= "" then
