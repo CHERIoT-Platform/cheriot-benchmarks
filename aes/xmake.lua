@@ -21,6 +21,10 @@ option("aesbench-enable-aes192")
     set_default("")
 option("aesbench-enable-aes256")
     set_default("")
+option("aesbench-enable-cbc")
+    set_default("")
+option("aesbench-enable-ctr")
+    set_default("")
 option("aesbench-key-count")
     set_default("")
 option("aesbench-iv-count")
@@ -71,6 +75,14 @@ compartment("aesbench")
     local enable_aes256 = get_config("aesbench-enable-aes256")
     if type(enable_aes256) ~= "nil" and enable_aes256 ~= "" then
         add_defines("AESBENCH_ENABLE_AES256=" .. enable_aes256)
+    end
+    local enable_cbc = get_config("aesbench-enable-cbc")
+    if type(enable_cbc) ~= "nil" and enable_cbc ~= "" then
+        add_defines("AESBENCH_ENABLE_CBC=" .. enable_cbc)
+    end
+    local enable_ctr = get_config("aesbench-enable-ctr")
+    if type(enable_ctr) ~= "nil" and enable_ctr ~= "" then
+        add_defines("AESBENCH_ENABLE_CTR=" .. enable_ctr)
     end
     local key_count = get_config("aesbench-key-count")
     if type(key_count) ~= "nil" and key_count ~= "" then

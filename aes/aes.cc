@@ -79,6 +79,14 @@ const size_t MaximumKeySize =
   128;
 #endif
 
+// Cipher modes to test
+#ifndef AESBENCH_ENABLE_CBC
+#	define AESBENCH_ENABLE_CBC 1
+#endif
+#ifndef AESBENCH_ENABLE_CTR
+#	define AESBENCH_ENABLE_CTR 1
+#endif
+
 // Number of keys to test per key size
 #ifndef AESBENCH_KEY_COUNT
 #	define AESBENCH_KEY_COUNT 3
@@ -660,23 +668,20 @@ int __cheri_compartment("aesbench") run()
 	ds::xoroshiro::P64R32 rand32(Seed);
 
 	const std::unique_ptr<AesImpl> Implementations[]{
-	  // optimised for code size, non-constant time
+#if AESBENCH_ENABLE_CBC == 1
 	  std::make_unique<BearAesSmallCbc>(),
-	  std::make_unique<BearAesSmallCtr>(),
-
-	  // table based, fast, non-constant time
 	  std::make_unique<BearAesBigCbc>(),
-	  std::make_unique<BearAesBigCtr>(),
-
-	  // constant-time, but slower than big
 	  std::make_unique<BearAesCtCbc>(),
-	  std::make_unique<BearAesCtCtr>(),
-
 	  std::make_unique<MicroAes128CbcImpl>(),
-	  std::make_unique<MicroAes128CtrImpl>(),
-
 	  std::make_unique<MbedtlsAesCbcImpl>(),
+#endif
+#if AESBENCH_ENABLE_CTR == 1
+	  std::make_unique<BearAesSmallCtr>(),
+	  std::make_unique<BearAesBigCtr>(),
+	  std::make_unique<BearAesCtCtr>(),
+	  std::make_unique<MicroAes128CtrImpl>(),
 	  std::make_unique<MbedtlsAesCtrImpl>(),
+#endif
 	};
 
 	warmup_mbedtls();
