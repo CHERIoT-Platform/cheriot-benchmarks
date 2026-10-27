@@ -18,6 +18,7 @@
 #include <bearssl_aead.h>
 #include <bearssl_block.h>
 #include <mbedtls/private/aes.h>
+#include <mbedtls/private/gcm.h>
 #include <micro_aes.h>
 
 #ifndef DEBUG_AESBENCH
@@ -739,6 +740,93 @@ class MicroAes128GcmImpl : public AesImpl
 	{ return "micro-AES.128.GCM"; }
 };
 
+class MbedtlsAesGcmImpl : public AesImpl
+{
+	mbedtls_gcm_context encCtx;
+	mbedtls_gcm_context decCtx;
+
+	public:
+	MbedtlsAesGcmImpl()
+	{
+		mbedtls_gcm_init(&encCtx);
+		mbedtls_gcm_init(&decCtx);
+	}
+
+	~MbedtlsAesGcmImpl() override
+	{
+		mbedtls_gcm_free(&encCtx);
+		mbedtls_gcm_free(&decCtx);
+	}
+
+	bool supports_key_size(size_t keySizeBits) override
+	{
+		switch (keySizeBits)
+		{
+			case 128:
+			case 192:
+			case 256:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	void set_key(const uint8_t *key, size_t keySizeBytes) override
+	{
+		size_t keySizeBits = keySizeBytes * 8;
+
+		int ret;
+
+		ret =
+		  mbedtls_gcm_setkey(&encCtx, MBEDTLS_CIPHER_ID_AES, key, keySizeBits);
+		Debug::Assert(ret == 0, "mbedtls_gcm_setkey={}", ret);
+
+		ret =
+		  mbedtls_gcm_setkey(&decCtx, MBEDTLS_CIPHER_ID_AES, key, keySizeBits);
+		Debug::Assert(ret == 0, "mbedtls_gcm_setkey={}", ret);
+	}
+
+	bool encrypt_bytes(uint8_t       *iv,
+	                   size_t         bufferSize,
+	                   const uint8_t *plaintext,
+	                   uint8_t       *ciphertext) override
+	{
+		int ret = mbedtls_gcm_crypt_and_tag(&encCtx,
+		                                    MBEDTLS_GCM_ENCRYPT,
+		                                    bufferSize,
+		                                    iv,
+		                                    AES_GCM_IV_SIZE,
+		                                    nullptr,
+		                                    0,
+		                                    plaintext,
+		                                    ciphertext,
+		                                    AES_GCM_TAG_SIZE,
+		                                    ciphertext + bufferSize);
+		return ret == 0;
+	}
+
+	bool decrypt_bytes(uint8_t       *iv,
+	                   size_t         bufferSize,
+	                   const uint8_t *ciphertext,
+	                   uint8_t       *plaintext) override
+	{
+		int ret = mbedtls_gcm_auth_decrypt(&decCtx,
+		                                   bufferSize,
+		                                   iv,
+		                                   AES_GCM_IV_SIZE,
+		                                   nullptr,
+		                                   0,
+		                                   ciphertext + bufferSize,
+		                                   AES_GCM_TAG_SIZE,
+		                                   ciphertext,
+		                                   plaintext);
+		return ret == 0;
+	}
+
+	const char *get_name() override
+	{ return "mbedtls.GCM"; }
+};
+
 /*
     Benchmarking code
 */
@@ -886,7 +974,7 @@ int __cheri_compartment("aesbench") run()
 	  std::make_unique<BearAesCtGcmCtmul32>(),
 	  std::make_unique<BearAesCtGcmCtmul64>(),
 	  std::make_unique<MicroAes128GcmImpl>(),
-	// std::make_unique<MbedtlsAesGcmImpl>(),
+	  std::make_unique<MbedtlsAesGcmImpl>(),
 #endif
 	};
 
