@@ -933,9 +933,10 @@ static void warmup_mbedtls()
 	mbedtls_aes_setkey_enc(&ctx, key, KeySizeBits);
 }
 
-static void
-fill_random_bytes(ds::xoroshiro::P16R8 &rand, uint8_t *buffer, size_t length)
+static void fill_random_bytes(uint8_t seed, uint8_t *buffer, size_t length)
 {
+	ds::xoroshiro::P16R8 rand(seed);
+
 	for (size_t i = 0; i < length; i++)
 		buffer[i] = rand.next();
 }
@@ -945,9 +946,6 @@ static uint8_t plaintextBuffer[MaximumPlaintextSize];
 
 int __cheri_compartment("aesbench") run()
 {
-	ds::xoroshiro::P16R8  rand8(Seed);
-	ds::xoroshiro::P64R32 rand32(Seed);
-
 	const std::unique_ptr<AesImpl> Implementations[]{
 #if AESBENCH_ENABLE_CBC == 1
 	  std::make_unique<BearAesSmallCbc>(),
@@ -1001,7 +999,7 @@ int __cheri_compartment("aesbench") run()
 		for (size_t plaintextId = 0; plaintextId < PlaintextCount;
 		     plaintextId++)
 		{
-			fill_random_bytes(rand8, plaintext, plaintextSize);
+			fill_random_bytes(Seed + plaintextId, plaintext, plaintextSize);
 
 #if AESBENCH_LOG_DATA == 1
 			fprintf(stderr, "Plaintext: ");
@@ -1019,12 +1017,12 @@ int __cheri_compartment("aesbench") run()
 
 				for (size_t keyId = 0; keyId < KeyCount; keyId++)
 				{
-					fill_random_bytes(rand8, key, keySizeBytes);
+					fill_random_bytes(Seed + keyId, key, keySizeBytes);
 
 					for (size_t ivId = 0; ivId < IvCount; ivId++)
 					{
 						uint8_t startIv[AES_CBC_IV_SIZE];
-						fill_random_bytes(rand8, startIv, sizeof startIv);
+						fill_random_bytes(Seed + ivId, startIv, sizeof startIv);
 
 						// CTR/GCM IVs are only 12 bytes, so it's fine to just
 						// use a subsection of this array for those
