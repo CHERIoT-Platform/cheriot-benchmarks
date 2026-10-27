@@ -123,6 +123,7 @@ compartment("aesbench")
 
         "MBEDTLS_PLATFORM_HAS_EXPLICIT_BZERO",
         "MBEDTLS_AES_C",
+        "MBEDTLS_GCM_C",
         "MBEDTLS_CIPHER_MODE_CBC",
         "MBEDTLS_CIPHER_MODE_CTR",
 
@@ -140,6 +141,9 @@ compartment("aesbench")
     add_sysincludedirs(mbedtls_crypto .. "/utilities")
     add_files(mbedtls_crypto .. "/platform/platform_util.c")
     add_files(mbedtls_crypto .. "/drivers/builtin/src/aes.c")
+    add_files(mbedtls_crypto .. "/drivers/builtin/src/block_cipher.c")
+    add_files(mbedtls_crypto .. "/drivers/builtin/src/gcm.c")
+    add_files(mbedtls_crypto .. "/utilities/constant_time.c")
 
     -- BearSSL Configuration
     add_defines("BR_INT128=0", "BR_UMUL128=0", "BR_USE_UNIX_TIME=1")
