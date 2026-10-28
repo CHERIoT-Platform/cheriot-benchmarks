@@ -54,11 +54,11 @@ jobs:
     - name: Build ${{ matrix.benchmark }}
       run: |
         set -e
-        cd aes
+        cd ${{ matrix.benchmark }}
         xmake f --board=${{ matrix.board }} --sdk=/cheriot-tools/ -m ${{ matrix.build-type }} ${{ matrix.build-flags }} ${{ matrix.benchmark-flags }}
         xmake
     - name: Run ${{ matrix.benchmark }}
       run: |
         set -e
-        cd aes
+        cd ${{ matrix.benchmark }}
         xmake run
