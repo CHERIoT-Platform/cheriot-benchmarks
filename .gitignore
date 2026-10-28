@@ -359,3 +359,8 @@ compile_commands.json
 *.rej
 *.out
 build
+
+# Analysis
+*.tsv
+.direnv
+*.svg
