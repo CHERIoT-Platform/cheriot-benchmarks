@@ -20,7 +20,7 @@ jobs:
       options: --user 1001
     steps:
     - name: Checkout repository and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
     - name: Generate compile_commands.json files
@@ -48,7 +48,7 @@ jobs:
       options: --user 1001
     steps:
     - name: Checkout repository and submodules
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         submodules: recursive
     - name: Build ${{ matrix.benchmark }}
