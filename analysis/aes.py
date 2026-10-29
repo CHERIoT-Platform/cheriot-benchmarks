@@ -6,6 +6,7 @@ from pathlib import Path
 
 import altair as alt
 import polars as pl
+from scipy.stats import f_oneway
 
 class Operation(StrEnum):
     ENCRYPT = "encrypt"
@@ -225,6 +226,42 @@ def plot_size_throughput(df: pl.DataFrame, key_size: int, mode: Mode, operation:
     print("Saved to", out_path)
 
 
+def test_ct(df: pl.DataFrame, key_size: int, mode: Mode, operation: Operation, secret: str, out_path: Path):
+    # Filter to requested results
+    df = df.filter(
+        pl.col("keySize") == key_size,
+        [Implementation(impl).mode == mode for impl in df["implementation"]],
+    )
+
+    # Only consider largest plaintexts
+    print(f"Analysing {key_size}-bit {mode} {operation.get_process_name()} results at largest plaintext size {df['plaintextSize'].max()/1024} KB for constant-time over secret {secret}")
+    df = df.filter(
+        pl.col('plaintextSize') == pl.col('plaintextSize').max()
+    )
+
+    # Calculate degrees of freedom
+    k = len(df.unique(secret))
+    N = k * len(df.unique('repetition'))
+
+    with out_path.open('w') as out:
+        out.write(f"implementation\tF({k-1},{N-k})\tp\n")
+        for impl, impl_df in df.partition_by('implementation', as_dict=True).items():
+            # Check full data is present for each implementation
+            impl_k = len(impl_df.unique(secret))
+            impl_N = impl_k * len(impl_df.unique('repetition'))
+            assert impl_k == k
+            assert impl_N == N
+
+            # ANOVA between secret values
+            f, p = f_oneway(*[
+                p.select(operation.get_field_name())
+                for p in impl_df.partition_by(secret)
+            ])
+
+            out.write(f"{impl[0]}\t{f[0]:.2f}\t{p[0]:.3f}\n")
+    print("Saved to", out_path)
+
+
 def main():
     parser = ArgumentParser(description="AES results analysis")
     parser.add_argument("in_path", type=Path, help="Results TSV path")
@@ -244,6 +281,13 @@ def main():
     sp_throughput.add_argument("out_path", type=Path)
     sp_throughput.add_argument("--scale-to-clock", **ClockScaling.get_parser_args())
 
+    sp_ct_plaintext = subparsers.add_parser("test_ct", help="Test the correlation between plaintext/key values and encryption/decryption times")
+    sp_ct_plaintext.add_argument("operation", **Operation.get_parser_args())
+    sp_ct_plaintext.add_argument("key_size", type=int, choices=KEY_SIZES)
+    sp_ct_plaintext.add_argument("mode", type=Mode, choices=Mode)
+    sp_ct_plaintext.add_argument("secret", type=str, choices=['plaintext', 'key'])
+    sp_ct_plaintext.add_argument("out_path", type=Path)
+
     args = parser.parse_args()
 
     results: pl.DataFrame = pl.read_csv(args.in_path, separator='\t')
@@ -258,6 +302,8 @@ def main():
             plot_size_time(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.out_path)
         case "plot_size_throughput":
             plot_size_throughput(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.out_path)
+        case "test_ct":
+            test_ct(results, args.key_size, args.mode, args.operation, args.secret + 'Id', args.out_path)
 
 if __name__ == '__main__':
     main()
