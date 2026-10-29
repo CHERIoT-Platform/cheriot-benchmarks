@@ -238,8 +238,9 @@ class BearSslAesCbcImpl : public AesImpl
 	                   uint8_t       *ciphertext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(ciphertext, plaintext, plaintextSize) == 0,
-		              "ciphertext must be initialised equal to plaintext");
+		Debug::Assert(
+		  [&]() { return memcmp(ciphertext, plaintext, plaintextSize) == 0; },
+		  "ciphertext must be initialised equal to plaintext");
 
 		EncRunFunc(&encCtx, iv, ciphertext, plaintextSize);
 
@@ -252,8 +253,9 @@ class BearSslAesCbcImpl : public AesImpl
 	                   uint8_t       *plaintext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(plaintext, ciphertext, plaintextSize) == 0,
-		              "plaintext must be initialised equal to ciphertext");
+		Debug::Assert(
+		  [&]() { return memcmp(ciphertext, plaintext, plaintextSize) == 0; },
+		  "plaintext must be initialised equal to ciphertext");
 
 		DecRunFunc(&decCtx, iv, plaintext, plaintextSize);
 
@@ -364,10 +366,10 @@ class MbedtlsAesCbcImpl : public AesImpl
 		int ret;
 
 		ret = mbedtls_aes_setkey_enc(&encCtx, key, keySizeBits);
-		Debug::Assert(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_enc={}", ret);
 
 		ret = mbedtls_aes_setkey_dec(&decCtx, key, keySizeBits);
-		Debug::Assert(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
+		Debug::Invariant(ret == 0, "mbedtls_aes_setkey_dec={}", ret);
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
@@ -463,8 +465,9 @@ class BearSslAesCtrImpl : public AesSymmetricImpl
 	         uint8_t       *outText) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(outText, inText, plaintextSize) == 0,
-		              "ciphertext must be initialised equal to plaintext");
+		Debug::Assert(
+		  [&]() { return memcmp(outText, inText, plaintextSize) == 0; },
+		  "ciphertext must be initialised equal to plaintext");
 
 		// Use the same counter start value as micro-AES
 		uint32_t cc = 1;
@@ -641,8 +644,9 @@ class BearSslAesGcmImpl : public AesImpl
 	                   uint8_t       *ciphertext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(ciphertext, plaintext, bufferSize) == 0,
-		              "ciphertext must be initialised equal to plaintext");
+		Debug::Assert(
+		  [&]() { return memcmp(ciphertext, plaintext, plaintextSize) == 0; },
+		  "ciphertext must be initialised equal to plaintext");
 
 		br_gcm_reset(&encCtx, iv, AES_GCM_IV_SIZE);
 		br_gcm_flip(&encCtx);
@@ -657,8 +661,9 @@ class BearSslAesGcmImpl : public AesImpl
 	                   uint8_t       *plaintext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(plaintext, ciphertext, bufferSize) == 0,
-		              "plaintext must be initialised equal to ciphertext");
+		Debug::Assert(
+		  [&]() { return memcmp(plaintext, ciphertext, plaintextSize) == 0; },
+		  "ciphertext must be initialised equal to plaintext");
 
 		br_gcm_reset(&decCtx, iv, AES_GCM_IV_SIZE);
 		br_gcm_flip(&decCtx);
@@ -789,11 +794,11 @@ class MbedtlsAesGcmImpl : public AesImpl
 
 		ret =
 		  mbedtls_gcm_setkey(&encCtx, MBEDTLS_CIPHER_ID_AES, key, keySizeBits);
-		Debug::Assert(ret == 0, "mbedtls_gcm_setkey={}", ret);
+		Debug::Invariant(ret == 0, "mbedtls_gcm_setkey={}", ret);
 
 		ret =
 		  mbedtls_gcm_setkey(&decCtx, MBEDTLS_CIPHER_ID_AES, key, keySizeBits);
-		Debug::Assert(ret == 0, "mbedtls_gcm_setkey={}", ret);
+		Debug::Invariant(ret == 0, "mbedtls_gcm_setkey={}", ret);
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
