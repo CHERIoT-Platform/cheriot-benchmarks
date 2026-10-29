@@ -129,8 +129,6 @@ const uint8_t Seed = AESBENCH_SEED;
 
 #define AES_GCM_TAG_SIZE 16
 
-// TODO: rename bufferSize now that plaintext and ciphertext sizes vary
-
 /**
  * Generic AES encryption/decryption interface
  */
@@ -151,44 +149,40 @@ class AesImpl
 	virtual void set_key(const uint8_t *key, size_t keySizeBytes) = 0;
 
 	/**
-	 * Encrypt plaintext
+	 * Encrypt the data from `plaintext` into the `ciphertext` buffer using `iv`
+	 * and a key previously set by `set_key`. Returns `true` if successful.
 	 *
-	 * @param iv         The initial iv value to use. Some implementations may
-	 *                   update this in-place.
-	 * @param bufferSize The size of plaintext and ciphertext
-	 * @param plaintext  The data to encrypt
-	 * @param ciphertext The destination to write the encrypted data. Should be
-	 *                   initialised equal to plaintext to allow some
-	 *                   implementations to work in-place (ex. BearSSL)
+	 * The contents of `ciphertext` should be initialised equal to `plaintext`
+	 * to allow implementations to work in-place (ex. BearSSL). Some
+	 * implementations require that `plaintext` and `ciphertext` do not overlap
+	 * (ex. micro-AES).
 	 *
-	 * @return           True if successful
-	 *
-	 * Some implementations require that plaintext and ciphertext do not
-	 * overlap (ex. micro-AES)
+	 * `plaintextSize` should be the size of the `plaintext` buffer, and the
+	 * `ciphertext` buffer should be equal to this plus `AES_GCM_TAG_SIZE` to
+	 * accommodate for GCM implementations (this extra space does not need to be
+	 * initialised).
 	 */
 	virtual bool encrypt_bytes(uint8_t       *iv,
-	                           size_t         bufferSize,
+	                           size_t         plaintextSize,
 	                           const uint8_t *plaintext,
 	                           uint8_t       *ciphertext) = 0;
 
 	/**
-	 * Decrypt ciphertext
+	 * Decrypt the data from `ciphertext` into the `plaintext` buffer using `iv`
+	 * and a key previously set by `set_key`. Returns `true` if successful.
 	 *
-	 * @param iv         The initial iv value to use. Some implementations may
-	 *                   update this in-place.
-	 * @param bufferSize The size of plaintext and ciphertext
-	 * @param ciphertext The data to decrypt
-	 * @param plaintext  The destination to write the decrypted data. Should be
-	 *                   initialised equal to ciphertext to allow some
-	 *                   implementations to work in-place (ex. BearSSL)
+	 * The contents of `plaintext` should be initialised equal to `ciphertext`
+	 * to allow implementations to work in-place (ex. BearSSL). Some
+	 * implementations require that `plaintext` and `ciphertext` do not overlap
+	 * (ex. micro-AES).
 	 *
-	 * @return           True if successful
-	 *
-	 * Some implementations require that plaintext and ciphertext do not
-	 * overlap (ex. micro-AES)
+	 * Unlike in `encrypt_bytes,` the requirement to initialise `plaintext`
+	 * equal to `cipherText` means that both buffers must be sized
+	 * `plaintextSize` plus `AES_GCM_TAG_SIZE` here. The actual decrypted output
+	 * stored into `plaintext` will still only be `plaintextSize` bytes long.
 	 */
 	virtual bool decrypt_bytes(uint8_t       *iv,
-	                           size_t         bufferSize,
+	                           size_t         plaintextSize,
 	                           const uint8_t *ciphertext,
 	                           uint8_t       *plaintext) = 0;
 
@@ -239,29 +233,29 @@ class BearSslAesCbcImpl : public AesImpl
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(ciphertext, plaintext, bufferSize) == 0,
+		Debug::Assert(memcmp(ciphertext, plaintext, plaintextSize) == 0,
 		              "ciphertext must be initialised equal to plaintext");
 
-		EncRunFunc(&encCtx, iv, ciphertext, bufferSize);
+		EncRunFunc(&encCtx, iv, ciphertext, plaintextSize);
 
 		return true;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(plaintext, ciphertext, bufferSize) == 0,
+		Debug::Assert(memcmp(plaintext, ciphertext, plaintextSize) == 0,
 		              "plaintext must be initialised equal to ciphertext");
 
-		DecRunFunc(&decCtx, iv, plaintext, bufferSize);
+		DecRunFunc(&decCtx, iv, plaintext, plaintextSize);
 
 		return true;
 	}
@@ -309,20 +303,22 @@ class MicroAes128CbcImpl : public AesImpl
 	{ this->key = key; }
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
-		char ret = AES_CBC_encrypt(key, iv, plaintext, bufferSize, ciphertext);
+		char ret =
+		  AES_CBC_encrypt(key, iv, plaintext, plaintextSize, ciphertext);
 		return ret == M_SUCCESS;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
-		char ret = AES_CBC_decrypt(key, iv, ciphertext, bufferSize, plaintext);
+		char ret =
+		  AES_CBC_decrypt(key, iv, ciphertext, plaintextSize, plaintext);
 		return ret == M_SUCCESS;
 	}
 
@@ -375,22 +371,30 @@ class MbedtlsAesCbcImpl : public AesImpl
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
-		int ret = mbedtls_aes_crypt_cbc(
-		  &encCtx, MBEDTLS_AES_ENCRYPT, bufferSize, iv, plaintext, ciphertext);
+		int ret = mbedtls_aes_crypt_cbc(&encCtx,
+		                                MBEDTLS_AES_ENCRYPT,
+		                                plaintextSize,
+		                                iv,
+		                                plaintext,
+		                                ciphertext);
 		return ret == 0;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
-		int ret = mbedtls_aes_crypt_cbc(
-		  &decCtx, MBEDTLS_AES_DECRYPT, bufferSize, iv, ciphertext, plaintext);
+		int ret = mbedtls_aes_crypt_cbc(&decCtx,
+		                                MBEDTLS_AES_DECRYPT,
+		                                plaintextSize,
+		                                iv,
+		                                ciphertext,
+		                                plaintext);
 		return ret == 0;
 	}
 
@@ -408,21 +412,21 @@ class AesSymmetricImpl : public AesImpl
 	 * Encrypt/decrypt inText to outText
 	 */
 	virtual bool run(uint8_t       *iv,
-	                 size_t         bufferSize,
+	                 size_t         plaintextSize,
 	                 const uint8_t *inText,
 	                 uint8_t       *outText) = 0;
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
-	{ return run(iv, bufferSize, plaintext, ciphertext); }
+	{ return run(iv, plaintextSize, plaintext, ciphertext); }
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
-	{ return run(iv, bufferSize, ciphertext, plaintext); }
+	{ return run(iv, plaintextSize, ciphertext, plaintext); }
 };
 
 template<typename Ctx,
@@ -454,18 +458,18 @@ class BearSslAesCtrImpl : public AesSymmetricImpl
 	{ InitFunc(&ctx, key, keySizeBytes); }
 
 	bool run(uint8_t       *iv,
-	         size_t         bufferSize,
+	         size_t         plaintextSize,
 	         const uint8_t *inText,
 	         uint8_t       *outText) override
 	{
 		// BearSSL works in-place
-		Debug::Assert(memcmp(outText, inText, bufferSize) == 0,
+		Debug::Assert(memcmp(outText, inText, plaintextSize) == 0,
 		              "ciphertext must be initialised equal to plaintext");
 
 		// Use the same counter start value as micro-AES
 		uint32_t cc = 1;
 
-		RunFunc(&ctx, iv, cc, outText, bufferSize);
+		RunFunc(&ctx, iv, cc, outText, plaintextSize);
 
 		return true;
 	}
@@ -504,11 +508,11 @@ class MicroAes128CtrImpl : public AesSymmetricImpl
 	{ this->key = key; }
 
 	bool run(uint8_t       *iv,
-	         size_t         bufferSize,
+	         size_t         plaintextSize,
 	         const uint8_t *inText,
 	         uint8_t       *outText) override
 	{
-		AES_CTR_encrypt(key, iv, inText, bufferSize, outText);
+		AES_CTR_encrypt(key, iv, inText, plaintextSize, outText);
 		return true;
 	}
 
@@ -576,15 +580,20 @@ class MbedtlsAesCtrImpl : public AesSymmetricImpl
 	}
 
 	bool run(uint8_t       *iv,
-	         size_t         bufferSize,
+	         size_t         plaintextSize,
 	         const uint8_t *plaintext,
 	         uint8_t       *ciphertext) override
 	{
 		int ret;
 
 		size_t ncOff = 0;
-		ret          = mbedtls_aes_crypt_ctr(
-		  &encCtx, bufferSize, &ncOff, iv, streamBlock, plaintext, ciphertext);
+		ret          = mbedtls_aes_crypt_ctr(&encCtx,
+		                                     plaintextSize,
+		                                     &ncOff,
+		                                     iv,
+		                                     streamBlock,
+		                                     plaintext,
+		                                     ciphertext);
 		return ret == 0;
 	}
 
@@ -627,7 +636,7 @@ class BearSslAesGcmImpl : public AesImpl
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
@@ -637,13 +646,13 @@ class BearSslAesGcmImpl : public AesImpl
 
 		br_gcm_reset(&encCtx, iv, AES_GCM_IV_SIZE);
 		br_gcm_flip(&encCtx);
-		br_gcm_run(&encCtx, true, ciphertext, bufferSize);
-		br_gcm_get_tag(&encCtx, ciphertext + bufferSize);
+		br_gcm_run(&encCtx, true, ciphertext, plaintextSize);
+		br_gcm_get_tag(&encCtx, ciphertext + plaintextSize);
 		return true;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
@@ -653,8 +662,8 @@ class BearSslAesGcmImpl : public AesImpl
 
 		br_gcm_reset(&decCtx, iv, AES_GCM_IV_SIZE);
 		br_gcm_flip(&decCtx);
-		br_gcm_run(&decCtx, false, plaintext, bufferSize);
-		return br_gcm_check_tag(&decCtx, ciphertext + bufferSize) == 1;
+		br_gcm_run(&decCtx, false, plaintext, plaintextSize);
+		return br_gcm_check_tag(&decCtx, ciphertext + plaintextSize) == 1;
 	}
 
 	const char *get_name() override
@@ -718,21 +727,22 @@ class MicroAes128GcmImpl : public AesImpl
 	{ this->key = key; }
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
-		AES_GCM_encrypt(key, iv, nullptr, 0, plaintext, bufferSize, ciphertext);
+		AES_GCM_encrypt(
+		  key, iv, nullptr, 0, plaintext, plaintextSize, ciphertext);
 		return true;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
 		char ret = AES_GCM_decrypt(
-		  key, iv, nullptr, 0, ciphertext, bufferSize, plaintext);
+		  key, iv, nullptr, 0, ciphertext, plaintextSize, plaintext);
 		return ret == M_SUCCESS;
 	}
 
@@ -787,13 +797,13 @@ class MbedtlsAesGcmImpl : public AesImpl
 	}
 
 	bool encrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *plaintext,
 	                   uint8_t       *ciphertext) override
 	{
 		int ret = mbedtls_gcm_crypt_and_tag(&encCtx,
 		                                    MBEDTLS_GCM_ENCRYPT,
-		                                    bufferSize,
+		                                    plaintextSize,
 		                                    iv,
 		                                    AES_GCM_IV_SIZE,
 		                                    nullptr,
@@ -801,22 +811,22 @@ class MbedtlsAesGcmImpl : public AesImpl
 		                                    plaintext,
 		                                    ciphertext,
 		                                    AES_GCM_TAG_SIZE,
-		                                    ciphertext + bufferSize);
+		                                    ciphertext + plaintextSize);
 		return ret == 0;
 	}
 
 	bool decrypt_bytes(uint8_t       *iv,
-	                   size_t         bufferSize,
+	                   size_t         plaintextSize,
 	                   const uint8_t *ciphertext,
 	                   uint8_t       *plaintext) override
 	{
 		int ret = mbedtls_gcm_auth_decrypt(&decCtx,
-		                                   bufferSize,
+		                                   plaintextSize,
 		                                   iv,
 		                                   AES_GCM_IV_SIZE,
 		                                   nullptr,
 		                                   0,
-		                                   ciphertext + bufferSize,
+		                                   ciphertext + plaintextSize,
 		                                   AES_GCM_TAG_SIZE,
 		                                   ciphertext,
 		                                   plaintext);
@@ -839,14 +849,10 @@ static uint8_t ciphertextBuffer[MaximumCiphertextSize];
 static uint8_t decryptedPlaintextBuffer[MaximumCiphertextSize];
 
 /**
- * Time the encryption and decryption of an AES implementation
- * @param impl the implementation to test
- * @param plaintext data to encrypt
- * @param plaintextSize length of plaintext buffer
- * @param key key to encrypt with
- * @param keySizeBytes length of key buffer in bytes
- * @param startIv initial iv value
- * @return pair of encryption time and decryption time in cycles
+ * Measures the time taken, in CPU cycles, to encrypt and decrypt `plaintext`
+ * using `impl` with `key` and `startIv`.
+ *
+ * Returns an std::pair of the encryption time and decryption time
  */
 static std::pair<int, int> test(AesImpl       &impl,
                                 const uint8_t *plaintext,
