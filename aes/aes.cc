@@ -172,14 +172,13 @@ class AesImpl
 	 * and a key previously set by `set_key`. Returns `true` if successful.
 	 *
 	 * The contents of `plaintext` should be initialised equal to `ciphertext`
-	 * to allow implementations to work in-place (ex. BearSSL). Some
-	 * implementations require that `plaintext` and `ciphertext` do not overlap
-	 * (ex. micro-AES).
+	 * (not including the GCM tag) to allow implementations to work in-place
+	 * (ex. BearSSL). Some implementations require that `plaintext` and
+	 * `ciphertext` do not overlap (ex. micro-AES).
 	 *
-	 * Unlike in `encrypt_bytes,` the requirement to initialise `plaintext`
-	 * equal to `cipherText` means that both buffers must be sized
-	 * `plaintextSize` plus `AES_GCM_TAG_SIZE` here. The actual decrypted output
-	 * stored into `plaintext` will still only be `plaintextSize` bytes long.
+	 * `plaintextSize` should be the size of the `plaintext` buffer, and the
+	 * `ciphertext` buffer should be equal to this plus `AES_GCM_TAG_SIZE` to
+	 * accommodate for GCM implementations.
 	 */
 	virtual bool decrypt_bytes(uint8_t       *iv,
 	                           size_t         plaintextSize,
@@ -851,7 +850,7 @@ static constexpr size_t MaximumCiphertextSize =
   MaximumPlaintextSize + AES_GCM_TAG_SIZE;
 
 static uint8_t ciphertextBuffer[MaximumCiphertextSize];
-static uint8_t decryptedPlaintextBuffer[MaximumCiphertextSize];
+static uint8_t decryptedPlaintextBuffer[MaximumPlaintextSize];
 
 /**
  * Measures the time taken, in CPU cycles, to encrypt and decrypt `plaintext`
@@ -871,11 +870,8 @@ static std::pair<int, int> test(AesImpl       &impl,
 	CHERI::Capability ciphertext{ciphertextBuffer};
 	ciphertext.bounds().set_inexact(ciphertextBufferSize);
 
-	// Since some algorithms work in-place, the decrypted plaintext buffer needs
-	// to contain the space for the GCM tag too, though the extra bytes will not
-	// be relevant to the result
 	CHERI::Capability decryptedPlaintext{decryptedPlaintextBuffer};
-	decryptedPlaintext.bounds().set_inexact(ciphertextBufferSize);
+	decryptedPlaintext.bounds().set_inexact(plaintextSize);
 
 	impl.set_key(key, keySizeBytes);
 
@@ -899,7 +895,7 @@ static std::pair<int, int> test(AesImpl       &impl,
 #endif
 
 	// Decrypt buffer
-	memcpy(decryptedPlaintext, ciphertext, ciphertextBufferSize);
+	memcpy(decryptedPlaintext, ciphertext, plaintextSize);
 	impl.init_working_iv(startIv, workingIv);
 	auto decStart = rdcycle();
 	bool decRet   = impl.decrypt_bytes(
