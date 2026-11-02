@@ -40,6 +40,39 @@ class Operation(StrEnum):
             case Operation.DECRYPT: return "ciphertext"
 
 
+class SizeUnit(StrEnum):
+    BYTES = "B"
+    KILOBYTES = "KB"
+
+    def get_name(self) -> str:
+        match self:
+            case SizeUnit.BYTES: return "Bytes"
+            case SizeUnit.KILOBYTES: return "KB"
+
+    def get_scaling(self) -> int:
+        match self:
+            case SizeUnit.BYTES: return 1
+            case SizeUnit.KILOBYTES: return 1024
+
+    def apply(self, df: pl.DataFrame, *columns: str) -> pl.DataFrame:
+        return df.with_columns(
+            pl.col(column) / self.get_scaling()
+            for column in columns
+        )
+
+    def __repr__(self) -> str:
+        return f"SizeUnit({self.get_name()} -> {self.get_scaling()})"
+
+    @staticmethod
+    def get_parser_args() -> dict:
+        return {
+            'help': "Convert size measurements to a given unit",
+            'type': SizeUnit,
+            'choices': SizeUnit,
+            'default': SizeUnit.BYTES,
+        }
+
+
 class ClockScaling:
     _clock_speed: int | None
 
@@ -126,7 +159,7 @@ class Implementation:
         ))
 
 
-def plot_size_time(df: pl.DataFrame, key_size: int, mode: Mode, operation: Operation, clock_scaling: ClockScaling, out_path: Path):
+def plot_size_time(df: pl.DataFrame, key_size: int, mode: Mode, operation: Operation, clock_scaling: ClockScaling, size_units: SizeUnit, out_path: Path):
     # Filter to requested results
     df = df.filter(
         pl.col("keySize") == key_size,
@@ -148,8 +181,8 @@ def plot_size_time(df: pl.DataFrame, key_size: int, mode: Mode, operation: Opera
         pl.col(operation.get_field_name()).median(),
     )
 
-    # Convert sizes to KB
-    df = df.with_columns(pl.col("plaintextSize") / 1024)
+    # Convert size units if requested
+    df = size_units.apply(df, 'plaintextSize')
 
     # Convert times to seconds if requested
     df = clock_scaling.apply(df, operation.get_field_name())
@@ -160,7 +193,7 @@ def plot_size_time(df: pl.DataFrame, key_size: int, mode: Mode, operation: Opera
         .encode(
             x=alt.X(
                 'plaintextSize',
-                title=f"{operation.get_input_name().capitalize()} Size (KB)"
+                title=f"{operation.get_input_name().capitalize()} Size ({size_units.get_name()})"
             ).scale(type='log'),
             y=alt.Y(
                 operation.get_field_name(),
@@ -174,7 +207,7 @@ def plot_size_time(df: pl.DataFrame, key_size: int, mode: Mode, operation: Opera
     print("Saved to", out_path)
 
 
-def plot_size_throughput(df: pl.DataFrame, key_size: int, mode: Mode, operation: Operation, clock_scaling: ClockScaling, out_path: Path):
+def plot_size_throughput(df: pl.DataFrame, key_size: int, mode: Mode, operation: Operation, clock_scaling: ClockScaling, size_units: SizeUnit, out_path: Path):
     # Filter to requested results
     df = df.filter(
         pl.col("keySize") == key_size,
@@ -196,8 +229,8 @@ def plot_size_throughput(df: pl.DataFrame, key_size: int, mode: Mode, operation:
         pl.col(operation.get_field_name()).median(),
     )
 
-    # Convert sizes to KB
-    df = df.with_columns(pl.col("plaintextSize") / 1024)
+    # Convert size units if requested
+    df = size_units.apply(df, 'plaintextSize')
 
     # Convert times to seconds if requested
     df = clock_scaling.apply(df, operation.get_field_name())
@@ -212,11 +245,11 @@ def plot_size_throughput(df: pl.DataFrame, key_size: int, mode: Mode, operation:
         .encode(
             x=alt.X(
                 'plaintextSize',
-                title=f"{operation.get_input_name().capitalize()} Size (KB)"
+                title=f"{operation.get_input_name().capitalize()} Size ({size_units.get_name()})"
             ).scale(type='log'),
             y=alt.Y(
                 operation.get_throughput_field_name(),
-                title=f"{operation.get_process_name().capitalize()} Throughput (KB/{clock_scaling.get_unit().capitalize()})"
+                title=f"{operation.get_process_name().capitalize()} Throughput ({size_units.get_name()}/{clock_scaling.get_unit().capitalize()})"
             ),
             color='implementation',
         )
@@ -268,18 +301,14 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     sp_time = subparsers.add_parser("plot_size_time", help="Plot time against plaintext size")
-    sp_time.add_argument("operation", **Operation.get_parser_args())
-    sp_time.add_argument("key_size", type=int, choices=KEY_SIZES)
-    sp_time.add_argument("mode", type=Mode, choices=Mode)
-    sp_time.add_argument("out_path", type=Path)
-    sp_time.add_argument("--scale-to-clock", **ClockScaling.get_parser_args())
-
     sp_throughput = subparsers.add_parser("plot_size_throughput", help="Plot throughput against plaintext size")
-    sp_throughput.add_argument("operation", **Operation.get_parser_args())
-    sp_throughput.add_argument("key_size", type=int, choices=KEY_SIZES)
-    sp_throughput.add_argument("mode", type=Mode, choices=Mode)
-    sp_throughput.add_argument("out_path", type=Path)
-    sp_throughput.add_argument("--scale-to-clock", **ClockScaling.get_parser_args())
+    for sp_plot in (sp_time, sp_throughput):
+        sp_plot.add_argument("operation", **Operation.get_parser_args())
+        sp_plot.add_argument("key_size", type=int, choices=KEY_SIZES)
+        sp_plot.add_argument("mode", type=Mode, choices=Mode)
+        sp_plot.add_argument("out_path", type=Path)
+        sp_plot.add_argument("--scale-to-clock", **ClockScaling.get_parser_args())
+        sp_plot.add_argument("--size-units", **SizeUnit.get_parser_args())
 
     sp_ct_plaintext = subparsers.add_parser("test_ct", help="Test the correlation between plaintext/key values and encryption/decryption times")
     sp_ct_plaintext.add_argument("operation", **Operation.get_parser_args())
@@ -299,9 +328,9 @@ def main():
 
     match args.command:
         case "plot_size_time":
-            plot_size_time(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.out_path)
+            plot_size_time(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.size_units, args.out_path)
         case "plot_size_throughput":
-            plot_size_throughput(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.out_path)
+            plot_size_throughput(results, args.key_size, args.mode, args.operation, args.scale_to_clock, args.size_units, args.out_path)
         case "test_ct":
             test_ct(results, args.key_size, args.mode, args.operation, args.secret + 'Id', args.out_path)
 
