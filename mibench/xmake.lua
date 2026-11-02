@@ -12,6 +12,9 @@ option("board")
 -- Helper to add a C++ test
 function test(name)
     compartment(name .. "_test")
+         -- Allow allocating an effectively unbounded amount of memory (more than exists)
+         add_defines("MALLOC_QUOTA=1000000")
+
          add_files(name .. "-test.cc")
 end
 
