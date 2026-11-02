@@ -19,4 +19,4 @@ function find_sdk () {
     fi
 }
 
-BENCHMARKS="aes"
+BENCHMARKS="aes mibench"

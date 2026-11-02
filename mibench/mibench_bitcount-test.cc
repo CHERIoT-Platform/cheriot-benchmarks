@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* +++Date last modified: 05-Jul-1997 */
 
 /*
@@ -176,3 +179,5 @@ static int ntbl_bitcnt(uint32_t x)
 
       return cnt;
 }
+
+// NOLINTEND

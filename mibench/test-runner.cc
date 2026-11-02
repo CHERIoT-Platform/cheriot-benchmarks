@@ -40,7 +40,6 @@ namespace
 		{
 			debug_log("{} finished in {} cycles", msg, cycles - startCycles);
 		}
-
 	}
 } // namespace
 

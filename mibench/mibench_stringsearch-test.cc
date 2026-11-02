@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* +++Date last modified: 05-Jul-1997 */
 
 /*
@@ -2765,3 +2768,5 @@ void test_mibench_stringsearch()
     }
     debug_log("Stringsearch, with {} successes, {} fails.\n", foundcnt, nfoundcnt);
 }
+
+// NOLINTEND

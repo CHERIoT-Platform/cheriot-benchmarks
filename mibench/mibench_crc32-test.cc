@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* +++Date last modified: 05-Jul-1997 */
 
 /* Crc - 32 BIT ANSI X3.66 CRC checksum files */
@@ -176,3 +179,5 @@ void test_mibench_crc32()
     debug_log("pcm size: {}", sizeof(test_input));
     debug_log("errors {}", errors);
 }
+
+// NOLINTEND

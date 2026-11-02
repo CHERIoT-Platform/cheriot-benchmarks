@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* +++Date last modified: 05-Jul-1997 */
 
 /*
@@ -33,3 +36,5 @@ unsigned checksum(void *buffer, size_t len, unsigned int seed);
 void checkexe(char *fname);
 
 #endif /* CRC__H */
+
+// NOLINTEND

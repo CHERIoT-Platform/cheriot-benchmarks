@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* +++Date last modified: 05-Jul-1997 */
 
 /*
@@ -35,3 +38,5 @@ typedef enum {Error_ = -1, Success_, False_ = 0, True_} Boolean_T;
 #define FREE(p) (free(p),(p)=NULL)
 
 #endif /* SNIPTYPE__H */
+
+// NOLINTEND

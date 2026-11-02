@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
  /*
    -----------------------------------------------------------------------
    Copyright (c) 2001 Dr Brian Gladman <brg@gladman.uk.net>, Worcester, UK
@@ -17,6 +20,8 @@
    fitness for purpose.
    -----------------------------------------------------------------------
  */
+
+#include "mibench_aes.h"
 
 const byte s_box[256] =
 {
@@ -293,3 +298,5 @@ const word im_tab[4][256] =
 #endif
 
 #endif
+
+// NOLINTEND

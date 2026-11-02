@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
  /*
    -----------------------------------------------------------------------
    Copyright (c) 2001 Dr Brian Gladman <brg@gladman.uk.net>, Worcester, UK
@@ -337,3 +340,5 @@ public:
 #endif
 #endif
 #endif
+
+// NOLINTEND

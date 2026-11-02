@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 #define TEST_NAME "MiBench-qsort"
 #include <debug.hh>
 #include <stdlib.h>
@@ -5254,3 +5257,5 @@ void test_mibench_qsort()
     qsort(qstring, count, 128 * sizeof(char),compare);
     debug_log("Qsort. The first element: {} The last element: {}", qstring[0], qstring[MAXARRAY-1]);
 }
+
+// NOLINTEND

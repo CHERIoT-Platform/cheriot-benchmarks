@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /* NIST Secure Hash Algorithm */
 /* heavily modified by Uwe Hollerbach uh@alumni.caltech edu */
 /* from Peter C. Gutmann's implementation as found in */
@@ -264,3 +267,5 @@ void test_mibench_sha()
     sha_stream(&info, input, sizeof(input));
     sha_print(&info);
 }
+
+// NOLINTEND

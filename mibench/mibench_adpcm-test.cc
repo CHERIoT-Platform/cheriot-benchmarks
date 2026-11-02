@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 /***********************************************************
   Copyright 1992 by Stichting Mathematisch Centrum, Amsterdam, The
   Netherlands.
@@ -302,3 +305,5 @@ void test_mibench_adpcm()
         totalProcessed += remain;
         debug_log("adpcm decoded {} bytes in total.", totalProcessed);
 }
+
+// NOLINTEND

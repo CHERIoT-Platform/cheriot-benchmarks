@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
  /*
    -----------------------------------------------------------------------
    Copyright (c) 2001 Dr Brian Gladman <brg@gladman.uk.net>, Worcester, UK
@@ -1112,3 +1115,5 @@ void test_mibench_aes() {
     main_aes(plainText, cipherBuf, sizeof(plainText), theKey);
     main_aes(cipherBuf, plainBuf, -sizeof(cipherBuf), theKey);
 }
+
+// NOLINTEND

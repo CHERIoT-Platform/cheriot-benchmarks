@@ -10,7 +10,8 @@ __cheri_compartment("mibench_bitcount_test") void test_mibench_bitcount();
 __cheri_compartment("mibench_dijkstra_test") void test_mibench_dijkstra();
 __cheri_compartment("mibench_qsort_test") void test_mibench_qsort();
 __cheri_compartment("mibench_sha_test") void test_mibench_sha();
-__cheri_compartment("mibench_stringsearch_test") void test_mibench_stringsearch();
+__cheri_compartment(
+  "mibench_stringsearch_test") void test_mibench_stringsearch();
 __cheri_compartment("mibench_adpcm_test") void test_mibench_adpcm();
 __cheri_compartment("mibench_aes_test") void test_mibench_aes();
 
@@ -24,9 +25,7 @@ using Test = ConditionalDebug<true,
 
 template<typename... Args>
 void debug_log(const char *fmt, Args... args)
-{
-	Test::log(fmt, args...);
-}
+{ Test::log(fmt, args...); }
 
 #define TEST(cond, msg, ...) Test::Invariant((cond), msg, ##__VA_ARGS__)
 #define TEST_EQUAL(e1, e2, msg)                                                \

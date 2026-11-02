@@ -1,3 +1,6 @@
+// NOLINTBEGIN
+// clang-format off
+
 #define TEST_NAME "MiBench-dijkstra"
 #include <debug.hh>
 #include <stdlib.h>
@@ -246,3 +249,5 @@ void test_mibench_dijkstra() {
       dijkstra(i_l,j);
   }
 }
+
+// NOLINTEND

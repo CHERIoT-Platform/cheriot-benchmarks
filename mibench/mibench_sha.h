@@ -1,5 +1,11 @@
+// NOLINTBEGIN
+// clang-format off
+
 #ifndef SHA_H
 #define SHA_H
+
+#include <stdint.h>
+#include <stddef.h>
 
 /* NIST Secure Hash Algorithm */
 /* heavily modified from Peter C. Gutmann's implementation */
@@ -26,3 +32,5 @@ void sha_stream(SHA_INFO *, char *, size_t);
 void sha_print(SHA_INFO *);
 
 #endif /* SHA_H */
+
+// NOLINTEND
