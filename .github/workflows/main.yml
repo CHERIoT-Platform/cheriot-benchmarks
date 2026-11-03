@@ -33,7 +33,7 @@ jobs:
       matrix:
         build-type: [ debug, release ]
         board: [ sail, ibex-safe-simulator, kudu-safe-simulator ]
-        benchmark: [ aes ]
+        benchmark: [ aes, mibench ]
         include:
           - benchmark: aes
             benchmark-flags: --aesbench-plaintext-size-min=32 --aesbench-plaintext-size-max=32 --aesbench-plaintext-count=1 --aesbench-key-count=1 --aesbench-iv-count=1 --aesbench-repeat-count=1
